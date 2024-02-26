@@ -1,78 +1,134 @@
 import abc
 import jax
 import jax.numpy as jnp
-from jax.scipy.fft import idctn
+import jax.scipy as jsp
 
-class RandomField2D(abc.ABC):
-    def __init__(self, size):
-        self.size = size
+class RandomField(abc.ABC):
+    def __init__(self, dim, size, **kwargs):
+        self._dim = dim
+        self._size = size
     
+    @property
+    def _sizes(self):
+        return (self._size for _ in range(self._dim))
+
     @abc.abstractmethod
-    def sample(self, key, n_samples):
+    def sample(self, n_samples, key):
         pass
 
-class IndependentGRF2D(RandomField2D):
+class IndependentGRF(RandomField):
     """ Independent Gaussian random field, i.e. white noise field """
-    def __init__(self, size, sigma):
-        super().__init__(size)
-        self.sigma = sigma
+    def __init__(self, dim, size, sigma, **kwargs):
+        super().__init__(dim, size)
+        self._sigma = sigma
     
-    def sample(self, key, n_samples):
-        z = self.sigma * jax.random.normal(key, (n_samples, *self.size, 2))
+    def sample(self, n_samples, key):
+        z = self._sigma * jax.random.normal(key, (n_samples, *self._sizes))
         return z
     
-class GRF2D(RandomField2D):
+class GRF(RandomField):
     """ Gaussian random field with covariance operator as C = sigma * (-Delta + tau^2)^{-alpha}"""
-    def __init__(self, size, sigma, alpha, tau):
-        super().__init__(size)
-        self.sigma = sigma
-        k1, k2 = jnp.arange(self.size[0]), jnp.arange(self.size[1])
-        K1, K2 = jnp.meshgrid(k1, k2)
-        C = (jnp.pi**2) * (K1**2 + K2**2) + tau**2
-        C = jnp.power(C, -alpha/2.0)
-        C = jnp.power(tau, alpha-1) * C
-        self.coeff = C
+    def __init__(self, dim, size, sigma, alpha, tau, bc, **kwargs):
+        super().__init__(dim, size)
+        self._sigma = sigma if sigma else jnp.power(tau, 0.5*(2*alpha-2.0))
+        self._bc = bc.lower()
+        if self._bc == 'none':
+            freqs = jnp.arange(self._size)
+        elif self._bc == 'periodic':
+            freqs = jnp.concatenate(
+                [jnp.arange(0, self._size//2),
+                jnp.arange(-self._size//2, 0)],
+                axis=0
+            )
+        else:
+            raise ValueError(f"Unknown boundary condition: {bc}, can only be 'none' or 'periodic'")
+        
+        if dim == 1:
+            sqrt_eig = self._size * jnp.sqrt(2.0) * self._sigma * \
+                jnp.power((jnp.pi**2 * freqs**2 + tau**2), -alpha/2.0)
+            self._sqrt_eig = sqrt_eig.at[0].set(0.0)
+        elif dim == 2:
+            k1 = jnp.tile(freqs.reshape(-1, 1), reps=(1, self._size))
+            k2 = jnp.transpose(k1, axes=(1, 0))
+            sqrt_eig = self._size**2 * jnp.sqrt(2.0) * self._sigma * \
+                jnp.power((jnp.pi**2 * (k1**2 + k2**2) + tau**2), -alpha/2.0)
+            self._sqrt_eig = sqrt_eig.at[0, 0].set(0.0)
+        else:
+            raise ValueError(f"{dim}-dimenisonal GRF has not been implemented")
     
-    def sample(self, key, n_samples):
-        xr = jax.random.normal(key, (n_samples, *self.size, 2))
-        xr = jnp.einsum('ij,nijk->nijk', self.coeff, xr)
-        xr = jnp.sqrt(self.size[0]*self.size[1]) * xr
-        xr = xr.at[:, 0, 0].set(0.0)
-        z = idctn(xr, axes=(1, 2))
+    def sample(self, n_samples, key):
+        if self._bc == 'none':
+            x = jax.random.normal(key, (n_samples, *self._sizes), dtype=jnp.float32)
+            if self._dim == 1:
+                x_dct = jsp.fft.dct(x, n=self._size, axis=1)
+                x = jnp.einsum('i,ni->ni', self._sqrt_eig, x_dct)
+                z = jsp.fft.idct(x, n=self._size, axis=1)
+            elif self._dim == 2:
+                x_dct = jsp.fft.dctn(x, s=self._sizes, axes=(1, 2))
+                x = jnp.einsum('ij,nij->nij', self._sqrt_eig, x)
+                z = jsp.fft.idctn(x, s=self._sizes, axes=(1, 2))
+        elif self._bc == 'periodic':
+            x = jax.random.normal(key, (n_samples, *self._sizes), dtype=jnp.complex64)
+            if self._dim == 1:
+                x_dft = jnp.fft.fft(x, n=self._size, axis=1)
+                x = jnp.einsum('i,ni->ni', self._sqrt_eig, x_dft)
+                z = jnp.fft.ifft(x, n=self._size, axis=1).real
+            elif self._dim == 2:
+                x_dft = jnp.fft.fft2(x, s=self._sizes, axes=(1, 2))
+                x = jnp.einsum('ij,nij->nij', self._sqrt_eig, x_dft)
+                z = jnp.fft.ifft2(x, s=self._sizes, axes=(1, 2)).real
         return z
     
-class PeriodicGRF2D(RandomField2D):
+class PeriodicGRF(RandomField):
     """ Gaussian random field with periodic boundary conditions """
-    def __init__(self, size, sigma, alpha, tau):
-        super().__init__(size)
-        self.sigma = sigma if sigma else jnp.power(tau, 0.5*(2*alpha-2.0))
+    def __init__(self, dim, size, sigma, alpha, tau, **kwargs):
+        super().__init__(dim, size)
+        self._sigma = sigma if sigma else jnp.power(tau, 0.5*(2*alpha-2.0))
 
-        freqs1 = jnp.concatenate(
-            [jnp.arange(0, self.size[0]//2),
-             jnp.arange(-self.size[0]//2, 0)],
-            axis=0
-        )
-        k1 = jnp.tile(freqs1.reshape(-1, 1), reps=(1, self.size[1]))
-        freqs2 = jnp.concatenate(
-            [jnp.arange(0, self.size[1]//2),
-             jnp.arange(-self.size[1]//2, 0)],
-            axis=0
-        )
-        k2 = jnp.tile(freqs2.reshape(1, -1), reps=(self.size[0], 1))
-        sqrt_eig = (
-            self.size[0] * self.size[1] * sigma * jnp.sqrt(2.0) * jnp.power(
-                (4.0 * jnp.pi**2 * (k1**2 + k2**2) + tau**2), -alpha/2.0
-            )   
-        )
-        sqrt_eig = sqrt_eig.at[0, 0].set(0.0)
-        sqrt_eig = sqrt_eig.at[jnp.logical_and(k1+k2<=0, jnp.logical_or(k1+k2!=0.0, k1<=0.0))].set(0.0)
-        self.sqrt_eig = sqrt_eig
+        if dim == 1:
+            freqs = jnp.concatenate(
+                [jnp.arange(0, self._size//2),
+                jnp.arange(-self._size//2, 0)],
+                axis=0
+            )
+            sqrt_eig = self._size * jnp.sqrt(2.0) * self._sigma * \
+                jnp.power((4.0 * jnp.pi**2 * freqs**2 + tau**2), -alpha/2.0)
+            self._sqrt_eig = sqrt_eig.at[0].set(0.0)
+        elif dim == 2:
+            freqs = jnp.concatenate(
+                [jnp.arange(0, self._size//2),
+                jnp.arange(-self._size//2, 0)],
+                axis=0
+            )
+            k1 = jnp.tile(freqs.reshape(-1, 1), reps=(1, self._size))
+            k2 = jnp.transpose(k1, axes=(1, 0))
+            sqrt_eig = self._size**2 * jnp.sqrt(2.0) * self._sigma * \
+                jnp.power((4.0 * jnp.pi**2 * (k1**2 + k2**2) + tau**2), -alpha/2.0)
+            self._sqrt_eig = sqrt_eig.at[0, 0].set(0.0)
+        else:
+            raise ValueError(f"{dim}-dimenisonal Periodic GRF has not been implemented")
 
-    def sample(self, key, n_samples):
-        x = jax.random.normal(key, (n_samples, *self.size, 2), dtype=jnp.complex64)
-        x = jnp.einsum('ij,nijk->nijk', self.sqrt_eig, x)
-        z = jnp.fft.ifft2(x, s=self.size, axes=(1, 2)).real
+    def sample(self, n_samples, key):
+        xi = jax.random.normal(key, (n_samples, *self._sizes), dtype=jnp.complex64)
+        if self._dim == 1:
+            xi = jnp.einsum('i,ni->ni', self._sqrt_eig, xi)
+            z = jnp.fft.fft(xi, n=self._size).imag
+        elif self._dim == 2:
+            xi = jnp.einsum('ij,nij->nij', self._sqrt_eig, xi)
+            z = jnp.fft.ifft2(xi, s=self._sizes, axes=(1, 2)).imag
         return z
 
 
+class GaussianRandomField:
+    def __init__(self, dim, size, gf_type, **kwargs):
+        assert gf_type.lower() in ['igrf', 'grf', 'pgrf'], f"Unknown random field type: {gf_type}, can only be 'wn', 'grf', or 'pgrf'"
+        if gf_type.lower() == 'igrf':
+            self._gf = IndependentGRF(dim, size, **kwargs)
+        elif gf_type.lower() == 'grf':
+            self._gf = GRF(dim, size, bc='none', **kwargs)
+        elif gf_type.lower() == 'pgrf':
+            self._gf = GRF(dim, size, bc='periodic', **kwargs)
+        
+    def sample(self, n_samples, key):
+        return self._gf.sample(n_samples, key)
 
