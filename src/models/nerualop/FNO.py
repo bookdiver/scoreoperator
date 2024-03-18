@@ -19,7 +19,7 @@ class FNO1D(nn.Module):
         ) for i in range(len(self.lifting_dims)-1)]
         self.projection_layer = nn.Dense(self.output_dim)
     
-    def __call__(self, x):
+    def __call__(self, x, train):
         """ x shape: (batch, n_samples, input_dim) """
         x = self.lifting_layer(x)
         for layer in self.fourier_blocks:
@@ -57,7 +57,7 @@ class TimeDependentFNO1D(nn.Module):
         ]
         self.projection_layer = nn.Dense(self.output_dim)
 
-    def __call__(self, x, t):
+    def __call__(self, x, t, train):
         """ x shape: (batch, n_samples, input_dim), 
             t shape: (batch, ) 
         """

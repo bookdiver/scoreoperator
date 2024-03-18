@@ -1,6 +1,20 @@
 import jax.numpy as jnp
 from flax import linen as nn
 
+def get_activation_fn(activation_str):
+    if activation_str == 'relu':
+        return nn.relu
+    elif activation_str == 'tanh':
+        return nn.tanh
+    elif activation_str == 'sigmoid':
+        return nn.sigmoid
+    elif activation_str == 'gelu':
+        return nn.gelu
+    elif activation_str == 'swish':
+        return nn.swish
+    else:
+        raise ValueError(f"Unknown activation function: {activation_str}")
+
 class SpectralConv1D(nn.Module):
     """ Integral kernel operator for mapping functions (u: R -> R^{input_dim}) to functions (v: R -> R^{output_dim}) """
     input_dim: int
@@ -69,7 +83,7 @@ class FourierBlock1D(nn.Module):
     input_dim: int
     output_dim: int
     n_modes: int
-    activation: nn.activation = nn.relu
+    activation: str
 
     def setup(self):
         self.spectral_conv = SpectralConv1D(
@@ -84,9 +98,10 @@ class FourierBlock1D(nn.Module):
     
     def __call__(self, x):
         """ x shape: (batch, n_samples, input_dim) """ 
+        act_fn = get_activation_fn(activation_str=self.activation)
         x_res = self.spectral_conv(x)
         x_jump = self.residual_transf(x)
-        return self.activation(x_res + x_jump)
+        return act_fn(x_res + x_jump)
     
 class ResidualFourierBlock1D(nn.Module):
     """ Modified Fourier block to incorporate time step embedding, used by ``Score-based Diffusion Models in Function Space paper`` """
@@ -94,7 +109,7 @@ class ResidualFourierBlock1D(nn.Module):
     output_dim: int
     encoding_dim: int
     n_modes: int
-    activation: nn.activation = nn.relu
+    activation: str
 
     def setup(self):
         self.spectral_conv1 = SpectralConv1D(
@@ -120,10 +135,11 @@ class ResidualFourierBlock1D(nn.Module):
         """ x shape: (batch, n_samples, input_dim),
             t_emb shape: (batch, encoding_dim)
         """
-        x_res = self.activation(self.spectral_conv1(x))
+        act_fn = get_activation_fn(activation_str=self.activation)
+        x_res = act_fn(self.spectral_conv1(x))
         w, b = jnp.split(self.time_mlp(t_emb)[:, None, :], 2, axis=-1)
         x_res = x_res * (w + 1.0) + b
-        x_res = self.spectral_conv2(self.activation(x_res))
+        x_res = self.spectral_conv2(act_fn(x_res))
         x_jump = self.residual_transf(x)
         return x_res + x_jump
     
@@ -132,7 +148,7 @@ class TMFourierBlock1D(nn.Module):
     output_dim: int
     encoding_dim: int
     n_modes: int
-    activation: nn.activation = nn.relu
+    activation: str
 
     def setup(self):
         self.spectral_conv = TMSpectralConv1D(
@@ -155,9 +171,10 @@ class TMFourierBlock1D(nn.Module):
         """ x shape: (batch, n_samples, input_dim),
             t_emb shape: (batch, encoding_dim)
         """
+        act_fn = get_activation_fn(activation_str=self.activation)
         t_emb = self.t_dense(t_emb)
         x_res = jnp.einsum('...d,...nd->...nd', t_emb, x)
-        return self.activation(self.spectral_conv(x, t_emb) + self.residual_transf(x_res))
+        return act_fn(self.spectral_conv(x, t_emb) + self.residual_transf(x_res))
     
 class TimeEncoding(nn.Module):
     """ Sinusoidal time step embedding """

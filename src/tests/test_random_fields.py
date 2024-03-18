@@ -1,41 +1,70 @@
-import pytest
 import matplotlib.pyplot as plt
 import jax
 import jax.numpy as jnp
 
-from ..random_fields import GaussianRandomField
+from ..models.diffusion.gaussian_process import GaussianRandomField
 
-def test_random_fields():
+
+def test_random_fields_1d():
     sigma = 1.0
-    alpha = 2.0
-    tau = 1.0
-    size = 64
+    nu = 2.5
+    kappa = 0.5
+    n_sample_pts = 64
     key = jax.random.PRNGKey(42)
 
-    igrf = GaussianRandomField(dim=2, size=size, gf_type='igrf', sigma=sigma)
-    grf = GaussianRandomField(dim=2, size=size, gf_type='grf', sigma=sigma, alpha=alpha, tau=tau)
-    pgrf = GaussianRandomField(dim=2, size=size, gf_type='pgrf', sigma=sigma, alpha=alpha, tau=tau)
+    igrf = GaussianRandomField(input_dim=1, output_dim=1, n_sample_pts=n_sample_pts, kernel_type='delta', sigma=sigma)
+    mgrf = GaussianRandomField(input_dim=1, output_dim=1, n_sample_pts=n_sample_pts, kernel_type='matern', sigma=sigma, nu=nu, kappa=kappa)
+    ggrf = GaussianRandomField(input_dim=1, output_dim=1, n_sample_pts=n_sample_pts, kernel_type='gaussian', sigma=sigma, kappa=kappa)
 
     n_samples = 3
-    z_igrf = igrf.sample(n_samples, key)
-    z_grf = grf.sample(n_samples, key)
-    z_pgrf = pgrf.sample(n_samples, key)
-    assert z_igrf.shape == (n_samples, size, size)
-    assert z_grf.shape == (n_samples, size, size)
-    assert z_pgrf.shape == (n_samples, size, size)
+    z_igrf = igrf.sample_batch(key, n_samples)
+    z_mgrf = mgrf.sample_batch(key, n_samples)
+    z_ggrf = ggrf.sample_batch(key, n_samples)
+    assert z_igrf.shape == (n_samples, n_sample_pts, 1)
+    assert z_mgrf.shape == (n_samples, n_sample_pts, 1)
+    assert z_ggrf.shape == (n_samples, n_sample_pts, 1)
     assert z_igrf.dtype == jnp.float32
-    assert z_grf.dtype == jnp.float32
-    assert z_pgrf.dtype == jnp.float32
+    assert z_mgrf.dtype == jnp.float32
+    assert z_ggrf.dtype == jnp.float32
 
     fig, ax = plt.subplots(3, 3)
     for i in range(3):
-        im1 = ax[i, 0].imshow(z_igrf[i])
-        im2 = ax[i, 1].imshow(z_grf[i])
-        im3 = ax[i, 2].imshow(z_pgrf[i])
+        ax[i, 0].plot(z_igrf[i, :, 0])
+        ax[i, 1].plot(z_mgrf[i, :, 0])
+        ax[i, 2].plot(z_ggrf[i, :, 0])
+    plt.show()
+
+def test_random_fields_2d():
+    sigma = 1.0
+    nu = 2.5
+    kappa = 0.1
+    n_sample_pts = 64
+    key = jax.random.PRNGKey(42)
+
+    igrf = GaussianRandomField(input_dim=2, output_dim=1, n_sample_pts=n_sample_pts, kernel_type='delta', sigma=sigma)
+    mgrf = GaussianRandomField(input_dim=2, output_dim=1, n_sample_pts=n_sample_pts, kernel_type='matern', sigma=sigma, nu=nu, kappa=kappa)
+    ggrf = GaussianRandomField(input_dim=2, output_dim=1, n_sample_pts=n_sample_pts, kernel_type='gaussian', sigma=sigma, kappa=kappa)
+
+    n_samples = 3
+    z_igrf = igrf.sample_batch(key, n_samples)
+    z_mgrf = mgrf.sample_batch(key, n_samples)
+    z_ggrf = ggrf.sample_batch(key, n_samples)
+    assert z_igrf.shape == (n_samples, n_sample_pts, n_sample_pts, 1)
+    assert z_mgrf.shape == (n_samples, n_sample_pts, n_sample_pts, 1)
+    assert z_ggrf.shape == (n_samples, n_sample_pts, n_sample_pts, 1)
+    assert z_igrf.dtype == jnp.float32
+    assert z_mgrf.dtype == jnp.float32
+    assert z_ggrf.dtype == jnp.float32
+
+    fig, ax = plt.subplots(3, 3)
+    for i in range(3):
+        im1 = ax[i, 0].imshow(z_igrf[i, :, :, 0])
+        im2 = ax[i, 1].imshow(z_mgrf[i, :, :, 0])
+        im3 = ax[i, 2].imshow(z_ggrf[i, :, :, 0])
         fig.colorbar(im1, ax=ax[i, 0])
         fig.colorbar(im2, ax=ax[i, 1])
         fig.colorbar(im3, ax=ax[i, 2])
         ax[i, 0].set_axis_off()
         ax[i, 1].set_axis_off()
         ax[i, 2].set_axis_off()
-    fig.savefig('./plot_results/test_random_fields.png')
+    plt.show()

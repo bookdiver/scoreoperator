@@ -4,7 +4,7 @@ import jax.numpy as jnp
 from flax import linen as nn
 import matplotlib.pyplot as plt
 
-from ..models.blocks import *
+from ..models.nerualop.blocks import *
 
 # set jax backend to be cpu
 jax.config.update('jax_platform_name', 'cpu')
