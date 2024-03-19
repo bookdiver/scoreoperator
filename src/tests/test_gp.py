@@ -2,19 +2,19 @@ import matplotlib.pyplot as plt
 import jax
 import jax.numpy as jnp
 
-from ..models.diffusion.gaussian_process import GaussianRandomField
+from ..models.diffusion.gaussian_process import GaussianProcess
 
 
-def test_random_fields_1d():
+def test_gp_1d():
     sigma = 1.0
     nu = 2.5
     kappa = 0.5
     n_sample_pts = 64
     key = jax.random.PRNGKey(42)
 
-    igrf = GaussianRandomField(input_dim=1, output_dim=1, n_sample_pts=n_sample_pts, kernel_type='delta', sigma=sigma)
-    mgrf = GaussianRandomField(input_dim=1, output_dim=1, n_sample_pts=n_sample_pts, kernel_type='matern', sigma=sigma, nu=nu, kappa=kappa)
-    ggrf = GaussianRandomField(input_dim=1, output_dim=1, n_sample_pts=n_sample_pts, kernel_type='gaussian', sigma=sigma, kappa=kappa)
+    igrf = GaussianProcess(input_dim=1, output_dim=1, n_sample_pts=n_sample_pts, kernel_type='delta', sigma=sigma)
+    mgrf = GaussianProcess(input_dim=1, output_dim=1, n_sample_pts=n_sample_pts, kernel_type='matern', sigma=sigma, nu=nu, kappa=kappa)
+    ggrf = GaussianProcess(input_dim=1, output_dim=1, n_sample_pts=n_sample_pts, kernel_type='gaussian', sigma=sigma, kappa=kappa)
 
     n_samples = 3
     z_igrf = igrf.sample_batch(key, n_samples)
@@ -34,16 +34,16 @@ def test_random_fields_1d():
         ax[i, 2].plot(z_ggrf[i, :, 0])
     plt.show()
 
-def test_random_fields_2d():
+def test_gp_2d():
     sigma = 1.0
     nu = 2.5
     kappa = 0.1
     n_sample_pts = 64
     key = jax.random.PRNGKey(42)
 
-    igrf = GaussianRandomField(input_dim=2, output_dim=1, n_sample_pts=n_sample_pts, kernel_type='delta', sigma=sigma)
-    mgrf = GaussianRandomField(input_dim=2, output_dim=1, n_sample_pts=n_sample_pts, kernel_type='matern', sigma=sigma, nu=nu, kappa=kappa)
-    ggrf = GaussianRandomField(input_dim=2, output_dim=1, n_sample_pts=n_sample_pts, kernel_type='gaussian', sigma=sigma, kappa=kappa)
+    igrf = GaussianProcess(input_dim=2, output_dim=1, n_sample_pts=n_sample_pts, kernel_type='delta', sigma=sigma)
+    mgrf = GaussianProcess(input_dim=2, output_dim=1, n_sample_pts=n_sample_pts, kernel_type='matern', sigma=sigma, nu=nu, kappa=kappa)
+    ggrf = GaussianProcess(input_dim=2, output_dim=1, n_sample_pts=n_sample_pts, kernel_type='gaussian', sigma=sigma, kappa=kappa)
 
     n_samples = 3
     z_igrf = igrf.sample_batch(key, n_samples)

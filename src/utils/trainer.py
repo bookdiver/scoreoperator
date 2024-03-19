@@ -4,9 +4,7 @@ import jax
 import jax.numpy as jnp
 from flax.training import train_state, checkpoints
 import optax
-import numpy as np
 from tqdm import tqdm
-from ml_collections import ConfigDict
 import wandb
 
 class TrainState(train_state.TrainState):
@@ -28,6 +26,8 @@ class TrainerModule:
         self._warmup_steps = config.warmup_steps if hasattr(config, "warmup_steps") else 0
         self._train_num_epochs = config.train_num_epochs
         self._train_num_steps_per_epoch = config.train_num_steps_per_epoch
+        self._save_dir = config.save_dir
+        self._load_dir = config.load_dir
 
         self._model = model
         self._dataloader = dataloader
@@ -62,7 +62,7 @@ class TrainerModule:
             )
 
             preds, new_model_state = outs if train else (outs, None)
-            loss = self.dsm_loss(preds, zs)
+            loss = self._dsm_loss(preds, zs)
             return loss, new_model_state
     
         def train_step(state, batch):
@@ -81,11 +81,10 @@ class TrainerModule:
                 train=False,
                 mutable=False
             )
-            return self.dsm_loss(preds, zs)
+            return self._dsm_loss(preds, zs)
         
         self._train_step = jax.jit(train_step)
         self._eval_step = jax.jit(eval_step)
-
 
     def _init_model(self):
         xs, ts, _ = next(self._dataloader)
@@ -107,7 +106,7 @@ class TrainerModule:
                     int(total_steps*0.85): 0.1
                 }
             )
-        elif self._optimizer_config.name.lower() == 'adam':
+        elif self._optimizer_name.lower() == 'adam':
             opt_class = optax.adam
             lr_schedule = optax.warmup_cosine_decay_schedule(
                 init_value=0.0,
@@ -134,21 +133,20 @@ class TrainerModule:
         train_losses = []
         for _ in range(self._train_num_steps_per_epoch):
             batch = next(self._dataloader)
-            self.state, loss = self.train_step(self.state, batch)
+            self.state, loss = self._train_step(self.state, batch)
             train_losses.append(loss)
-        avg_train_loss = np.stack(jax.device_get(train_losses)).mean()
+        avg_train_loss = jnp.stack(jax.device_get(train_losses)).mean()
         return avg_train_loss
-
 
     def train_model(self):
         self._init_optimizer()
 
-        with tqdm(range(self._training_config.num_epochs), desc="Training", unit="epoch") as pbar:
+        with tqdm(range(self._train_num_epochs), desc="Training", unit="epoch") as pbar:
             for epoch in pbar:
-                epoch_avg_loss = self.train_epoch()
+                epoch_avg_loss = self._train_epoch()
             
-                eval_batch = next(self._diffusion_eval_loader)
-                eval_loss = self.eval_step(self.state, eval_batch)
+                eval_batch = next(self._dataloader)
+                eval_loss = self._eval_step(self.state, eval_batch)
                 
                 if self._enable_wandb:
                     wandb.log({
@@ -157,8 +155,20 @@ class TrainerModule:
                     }, step=epoch)
                 pbar.set_postfix(Epoch=epoch, train_loss=f"{epoch_avg_loss:.4f}", eval_loss=f"{eval_loss:.4f}")
 
+    @jax.jit
+    def infer_model(self, batch):
+        xs, ts = batch
+        score_outs = self._model.apply(
+            {"params": self.state.params, "batch_stats": self.state.batch_stats},
+            xs,
+            ts,
+            train=False,
+            mutable=False
+        )
+        return score_outs
+
     def save_model(self, save_dir, step=0):
-        ckpt_dir = save_dir if save_dir else self._record_config.save_dir
+        ckpt_dir = save_dir if save_dir else self._save_dir
         checkpoints.save_checkpoint(ckpt_dir=ckpt_dir,
                                     target={
                                         "params": self.state.params,
@@ -168,9 +178,9 @@ class TrainerModule:
                                     overwrite=True)
     
     def load_model(self, load_dir, pretrained=False):
-        load_dir = load_dir if load_dir else self._record_config.save_dir
+        load_dir = load_dir if load_dir else self._save_dir
         if not pretrained:
-            state_dict = checkpoints.restore_checkpoint(ckpt_dir=self._record_config.save_dir, target=None)
+            state_dict = checkpoints.restore_checkpoint(ckpt_dir=self._save_dir, target=None)
         else:
             assert self.checkpoint_exists(load_dir), "There is no pretrained model available!"
             state_dict = checkpoints.restore_checkpoint(ckpt_dir=os.path.join(load_dir, f"{self.model_name}.ckpt"), target=None)
@@ -179,5 +189,5 @@ class TrainerModule:
                                        batch_stats=state_dict["batch_stats"],
                                        tx=self.state.tx if self.state else optax.sgd(0.1))
     
-    def checkpoint_exists(self, load_dir):
+    def _checkpoint_exists(self, load_dir):
         return os.path.isfile(os.path.join(load_dir, f"{self.model_name}.ckpt"))
