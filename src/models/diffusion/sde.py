@@ -20,11 +20,13 @@ class SDE(abc.ABC):
         pass
 
     def sample(self, key, t, x0, verbose=False):
-        mean, std = self._transition_prob(t, x0)
+        mean, std = self._transition_prob(t=t, x=None, x0=x0)
         z = self._gp.sample(key)
-        xt = mean + std * z
+        noise = std * z
+        xt = mean + noise
         if verbose:
-            return (xt, t, z)
+            # return (xt, t, noise, std**2)
+            return (xt, t, noise, std)
         else:
             return xt
         
@@ -46,10 +48,26 @@ class BrownianSDE(SDE):
     
     def _transition_prob(self, t, x, x0):
         mean = x0
-        std = jnp.sqrt(self._sigma * t) 
+        std = self._sigma * jnp.sqrt(t) 
         return mean, std
 
+class OUSDE(SDE):
+    def __init__(self, gp, theta, sigma):
+        super().__init__(gp)
+        self._theta = theta
+        self._sigma = sigma
 
+    def f(self, t, x):
+        return -self._theta * x
+    
+    def g(self, t, x):
+        return self._sigma * jnp.eye(x.shape[-1])
+    
+    def _transition_prob(self, t, x, x0):
+        mean = jnp.exp(-self._theta * t) * x0
+        std = self._sigma * jnp.sqrt(1 - jnp.exp(-2 * self._theta * t) / (2 * self._theta))
+        return mean, std
+    
 class VPSDE(SDE):
     def __init__(self, gp, betas):
         super().__init__(gp)
@@ -64,7 +82,7 @@ class VPSDE(SDE):
     def g(self, t, x):
         return jnp.sqrt(self.beta(t)) * jnp.eye(x.shape[-1])
 
-    def transition_prob(self, t, x0):
+    def _transition_prob(self, t, x, x0):
         log_mean_coeff = -0.25 * t**2 * (self._beta_max - self._beta_min) - 0.5 * t * self._beta_min
         mean = jnp.exp(log_mean_coeff) * x0
         std = jnp.sqrt(1 - jnp.exp(2.0 * log_mean_coeff))

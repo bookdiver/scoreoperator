@@ -38,7 +38,8 @@ class TrainerModule:
         self._init_model()
 
     @staticmethod
-    def _dsm_loss(preds, zs):
+    def _dsm_loss(preds, zs, sigmas):
+        # scaled_preds = jax.vmap(lambda x, y: x * y)(sigmas, preds)
         loss = jnp.mean(
             jnp.mean(
                 jnp.sum((preds + zs)**2, axis=-1),
@@ -51,7 +52,7 @@ class TrainerModule:
     def _create_functions(self):
         
         def compute_loss(params, batch_stats, batch, train):
-            xs, ts, zs = batch
+            xs, ts, zs, sigmas = batch
 
             outs = self._model.apply(
                 {"params": params, "batch_stats": batch_stats},
@@ -62,7 +63,7 @@ class TrainerModule:
             )
 
             preds, new_model_state = outs if train else (outs, None)
-            loss = self._dsm_loss(preds, zs)
+            loss = self._dsm_loss(preds, zs, sigmas)
             return loss, new_model_state
     
         def train_step(state, batch):
@@ -73,7 +74,7 @@ class TrainerModule:
             return state, loss
         
         def eval_step(state, batch):
-            xs, ts, zs = batch
+            xs, ts, zs, sigmas = batch
             preds = state.apply_fn(
                 {"params": state.params, "batch_stats": state.batch_stats},
                 xs,
@@ -81,13 +82,13 @@ class TrainerModule:
                 train=False,
                 mutable=False
             )
-            return self._dsm_loss(preds, zs)
+            return self._dsm_loss(preds, zs, sigmas)
         
         self._train_step = jax.jit(train_step)
         self._eval_step = jax.jit(eval_step)
 
     def _init_model(self):
-        xs, ts, _ = next(self._dataloader)
+        xs, ts, _, _ = next(self._dataloader)
         init_rng_key = jax.random.PRNGKey(self._seed)
         variables = self._model.init(init_rng_key, xs, ts, train=True)
         self.init_params = variables["params"]
@@ -155,10 +156,9 @@ class TrainerModule:
                     }, step=epoch)
                 pbar.set_postfix(Epoch=epoch, train_loss=f"{epoch_avg_loss:.4f}", eval_loss=f"{eval_loss:.4f}")
 
-    @jax.jit
     def infer_model(self, batch):
         xs, ts = batch
-        score_outs = self._model.apply(
+        score_outs = self.state.apply_fn(
             {"params": self.state.params, "batch_stats": self.state.batch_stats},
             xs,
             ts,
