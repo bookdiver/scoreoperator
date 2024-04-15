@@ -1,105 +1,82 @@
-from typing import List
+from dataclasses import field
 from flax import linen as nn
 
 from .blocks import *
-    
-class TimeDependentFNO1D(nn.Module):
-    """ Time dependent Fourier Neural Operator for mapping: (v: R -> R^{input_dim}) -> (u: R -> R^{output_dim})"""
-    output_dim: int
-    lifting_dims: list
-    max_n_modes: list
-    activation: str
-    time_incrop_method: str
-    time_embedding_dim: int
-
-    @nn.compact
-    def __call__(self, x, t, train):
-        """ x shape: (batch, n_samples, input_dim), 
-            t shape: (batch, ) 
-
-            output shape: (batch, n_samples, output_dim)
-        """
-        if self.time_incrop_method == 'resnet':
-            block_cls = ResidualFourierBlock1D
-        elif self.time_incrop_method == 'time_modulated':
-            block_cls = TimeModulatedFourierBlock1D
-        else:
-            raise ValueError(f"Invalid time_incrop_method: {self.time_incrop_method}")
-        
-        t_emb = TimeEmbedding(
-            self.time_embedding_dim,
-        )(t)
-        
-        x = nn.Dense(
-            self.lifting_dims[0],
-        )(x)
-        
-        for i in range(len(self.lifting_dims)-1):
-            x = block_cls(
-                self.lifting_dims[i],
-                self.lifting_dims[i+1],
-                self.time_embedding_dim,
-                n_modes=self.max_n_modes[i],
-                activation=self.activation,
-            )(x, t_emb, train)
-
-        x = nn.Dense(
-            self.output_dim,
-        )(x)
-        
-        return x
 
 class UNO1D(nn.Module):
     """ U-Net shaped time-dependent neural operator"""
-    output_dim: int
+    out_co_dim: int
     lifting_dim: int
-    n_modes_fmult: float = 1.0
-    dims_fmults: List[int] = [1, 2, 4, 4]
-    activation: str  = "relu"
+    co_dims_fmults: tuple
+    n_modes_per_layer: tuple
+    norm: str = "instance"
+    act: str  = "relu"
 
     @nn.compact
     def __call__(self, x: jnp.ndarray, t: jnp.ndarray, train: bool = False) -> jnp.ndarray:
-        time_embedding_dim = 4 * self.lifting_dim
+        t_emb_dim = 4 * self.lifting_dim
+        _, in_grid_sz, _ = x.shape
+        co_dims_fmults = (1,) + self.co_dims_fmults
 
         t_emb = TimeEmbedding(
-            embedding_dim=time_embedding_dim,
+            t_emb_dim,
         )(t)
 
-        x_lifted = nn.Dense(
+        x = nn.Dense(
             self.lifting_dim,
         )(x)
 
-        x_down1 = TimeModulatedFourierBlock1D(
-            input_dim=self.lifting_dim,
-            output_dim=self.lifting_dim * self.dims_fmults[0],
-            encoding_dim=time_embedding_dim,
-            n_modes=int(self.n_modes_fmult * self.lifting_dim),
-            activation=self.activation,
-        )(x_lifted, t_emb, train)
+        out_grid_sz_fmults = [1. / dim_fmult for dim_fmult in co_dims_fmults]
 
-        x_down2 = TimeModulatedFourierBlock1D(
-            input_dim=self.lifting_dim * self.dims_fmults[0],
-            output_dim=self.lifting_dim * self.dims_fmults[1],
-            encoding_dim=time_embedding_dim,
-            n_modes=int(self.n_modes_fmult * self.lifting_dim * self.dims_fmults[0]),
-            activation=self.activation,
-        )(x_down1, t_emb, train)
+        downs = []
+        for idx_layer in range(len(self.co_dims_fmults)):
+            in_co_dim_fmult = co_dims_fmults[idx_layer]
+            out_co_dim_fmult = co_dims_fmults[idx_layer+1]
+            out_grid_sz = int(out_grid_sz_fmults[idx_layer+1] * in_grid_sz)
+            n_modes = self.n_modes_per_layer[idx_layer]
+            x = TimeModulatedFourierBlock1D(
+                in_co_dim=int(self.lifting_dim * in_co_dim_fmult),
+                out_co_dim=int(self.lifting_dim * out_co_dim_fmult),
+                t_emb_dim=t_emb_dim,
+                n_modes=n_modes,
+                out_grid_sz=out_grid_sz,
+                norm=self.norm,
+                act=self.act
+            )(x, t_emb, train)
+            downs.append(x)
 
-        x_down3 = TimeModulatedFourierBlock1D(
-            input_dim=self.lifting_dim * self.dims_fmults[1],
-            output_dim=self.lifting_dim * self.dims_fmults[2],
-            encoding_dim=time_embedding_dim,
-            n_modes=int(self.n_modes_fmult * self.lifting_dim * self.dims_fmults[1]),
-            activation=self.activation,
-        )(x_down2, t_emb, train)
+        x = TimeModulatedFourierBlock1D(
+            in_co_dim=self.lifting_dim * self.co_dims_fmults[-1],
+            out_co_dim=self.lifting_dim * self.co_dims_fmults[-1],
+            t_emb_dim=t_emb_dim,
+            n_modes=self.n_modes_per_layer[-1],
+            out_grid_sz=int(out_grid_sz_fmults[-1] * in_grid_sz),
+            norm=self.norm,
+            act=self.act
+        )(x, t_emb, train)
 
-        x_down4 = TimeModulatedFourierBlock1D(
-            input_dim=self.lifting_dim * self.dims_fmults[2],
-            output_dim=self.lifting_dim * self.dims_fmults[3],
-            encoding_dim=time_embedding_dim,
-            n_modes=int(self.n_modes_fmult * self.lifting_dim * self.dims_fmults[2]),
-            activation=self.activation,
-        )(x_down3, t_emb, train)
+        for idx_layer in range(1, len(self.co_dims_fmults)+1):
+            in_co_dim_fmult = co_dims_fmults[-idx_layer]
+            out_co_dim_fmult = co_dims_fmults[-(idx_layer+1)] 
+            out_grid_sz = int(out_grid_sz_fmults[-(idx_layer+1)] * in_grid_sz)
+            n_modes = self.n_modes_per_layer[-idx_layer]
+            down = downs[-idx_layer]
+            x = jnp.concatenate([x, down], axis=-1)
+            x = TimeModulatedFourierBlock1D(
+                in_co_dim=int(self.lifting_dim * in_co_dim_fmult * 2),
+                out_co_dim=int(self.lifting_dim * out_co_dim_fmult),
+                t_emb_dim=t_emb_dim,
+                n_modes=n_modes,
+                out_grid_sz=out_grid_sz,
+                norm=self.norm,
+                act=self.act
+            )(x, t_emb, train)
+        
+        x = nn.Dense(
+            self.out_co_dim,
+        )(x)
+
+        return x
 
         
 

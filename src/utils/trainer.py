@@ -39,7 +39,7 @@ class TrainerModule:
 
     @staticmethod
     def dsm_loss(preds, zs, sigmas):
-        # zs = jax.vmap(lambda x, y: x * y)(zs, 1.0 / sigmas**2)
+        zs = jax.vmap(lambda x, y: x * y)(zs, 1.0 / sigmas)
         # preds = jax.vmap(lambda x, y: x * y)(preds, sigmas**2)
         loss = jnp.mean(
             jnp.mean(
