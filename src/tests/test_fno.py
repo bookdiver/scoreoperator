@@ -22,7 +22,6 @@ def test_TimeEmbedding():
     pe = time_encoding.apply(params, ts)
     plt.imshow(pe, cmap='RdGy')
     plt.colorbar()
-    plt.show()
     assert pe.shape == (100, embedding_dim)
 
 def test_SpectralConv1D():

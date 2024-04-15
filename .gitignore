@@ -167,4 +167,5 @@ cython_debug/
 plot_results
 wandb
 settings.json
+pretrained
 

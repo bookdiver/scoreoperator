@@ -1,3 +1,4 @@
+from typing import List
 from flax import linen as nn
 
 from .blocks import *
@@ -47,3 +48,60 @@ class TimeDependentFNO1D(nn.Module):
         )(x)
         
         return x
+
+class UNO1D(nn.Module):
+    """ U-Net shaped time-dependent neural operator"""
+    output_dim: int
+    lifting_dim: int
+    n_modes_fmult: float = 1.0
+    dims_fmults: List[int] = [1, 2, 4, 4]
+    activation: str  = "relu"
+
+    @nn.compact
+    def __call__(self, x: jnp.ndarray, t: jnp.ndarray, train: bool = False) -> jnp.ndarray:
+        time_embedding_dim = 4 * self.lifting_dim
+
+        t_emb = TimeEmbedding(
+            embedding_dim=time_embedding_dim,
+        )(t)
+
+        x_lifted = nn.Dense(
+            self.lifting_dim,
+        )(x)
+
+        x_down1 = TimeModulatedFourierBlock1D(
+            input_dim=self.lifting_dim,
+            output_dim=self.lifting_dim * self.dims_fmults[0],
+            encoding_dim=time_embedding_dim,
+            n_modes=int(self.n_modes_fmult * self.lifting_dim),
+            activation=self.activation,
+        )(x_lifted, t_emb, train)
+
+        x_down2 = TimeModulatedFourierBlock1D(
+            input_dim=self.lifting_dim * self.dims_fmults[0],
+            output_dim=self.lifting_dim * self.dims_fmults[1],
+            encoding_dim=time_embedding_dim,
+            n_modes=int(self.n_modes_fmult * self.lifting_dim * self.dims_fmults[0]),
+            activation=self.activation,
+        )(x_down1, t_emb, train)
+
+        x_down3 = TimeModulatedFourierBlock1D(
+            input_dim=self.lifting_dim * self.dims_fmults[1],
+            output_dim=self.lifting_dim * self.dims_fmults[2],
+            encoding_dim=time_embedding_dim,
+            n_modes=int(self.n_modes_fmult * self.lifting_dim * self.dims_fmults[1]),
+            activation=self.activation,
+        )(x_down2, t_emb, train)
+
+        x_down4 = TimeModulatedFourierBlock1D(
+            input_dim=self.lifting_dim * self.dims_fmults[2],
+            output_dim=self.lifting_dim * self.dims_fmults[3],
+            encoding_dim=time_embedding_dim,
+            n_modes=int(self.n_modes_fmult * self.lifting_dim * self.dims_fmults[2]),
+            activation=self.activation,
+        )(x_down3, t_emb, train)
+
+        
+
+
+

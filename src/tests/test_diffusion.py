@@ -1,7 +1,7 @@
 import jax
 import jax.numpy as jnp
 
-from ..data.toys.toy_shapes import Circle
+from ..data.synthetic_shapes import Circle
 from ..models.diffusion.sde import BrownianSDE, VPSDE
 from ..models.diffusion.gaussian_process import GaussianProcess
 from ..models.diffusion.diffusion import DiffusionLoader
