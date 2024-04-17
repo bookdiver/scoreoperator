@@ -7,7 +7,7 @@ import jax.numpy as jnp
 from flax.training import train_state, checkpoints
 import optax
 from tqdm import tqdm
-import wandb
+# import wandb
 
 class TrainState(train_state.TrainState):
     batch_stats: dict
