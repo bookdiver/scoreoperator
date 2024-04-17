@@ -4,7 +4,7 @@ from .shape import Shape
 
 class Butterfly(Shape):
     def __init__(self, load_name: str):
-        self.pts = jnp.load("/Users/vbd402/Documents/Projects/scoreoperator/src/data/raw/"+f"{load_name}.npy")
+        self.pts = jnp.load("/home/gefan/Projects/scoreoperator/src/data/raw/"+f"{load_name}.npy")
 
     def sample(self, n_samples: int):
         if n_samples >= len(self.pts):

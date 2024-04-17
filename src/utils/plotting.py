@@ -3,16 +3,20 @@ from matplotlib import colormaps
 import matplotlib.pyplot as plt
 import jax.numpy as jnp
 
+from .util import cpu_run
+
 def close_2d_curve(pts: jnp.ndarray):
     """Close a 2D curve by adding the first point to the end."""
     return jnp.concatenate([pts, pts[:1]], axis=0)
 
+@cpu_run
 def plot_shape_with_pts(ax, pts, color, marker='o', label=''):
     """Plot a shape with sampled points."""
     ax.plot(*close_2d_curve(pts).T, color=color, label=label)
     ax.scatter(*pts.T, color=color, marker=marker)
     return ax
 
+@cpu_run
 def plot_trajectories(ax, traj, target, cmap_name="viridis", plot_target=True):
     cmap = colormaps.get_cmap(cmap_name)
     colors = cmap(jnp.linspace(0., 1., traj.shape[0]))
