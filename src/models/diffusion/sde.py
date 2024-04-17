@@ -25,7 +25,6 @@ class SDE(abc.ABC):
         noise = std * z
         xt = mean + noise
         if verbose:
-            # return (xt, t, noise, std**2)
             return (xt, t, noise, std)
         else:
             return xt
