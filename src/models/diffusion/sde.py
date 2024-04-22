@@ -2,7 +2,6 @@ import abc
 import jax.numpy as jnp
 
 class SDE(abc.ABC):
-    dim: int
 
     def __init__(self):
         super().__init__()
@@ -23,7 +22,6 @@ class SDE(abc.ABC):
         return jnp.linalg.inv(self.covariance(t, x))
     
     def get_reverse_bridge(self, score_fn: callable = None) -> "SDE":
-        dim = self.dim
         f = self.f
         g = self.g
         cov = self.covariance
@@ -31,36 +29,38 @@ class SDE(abc.ABC):
         class ReverseSDE(SDE):
             def __init__(self):
                 super().__init__()
-                self.dim = dim
 
             def f(self, t: float, x: jnp.ndarray) -> jnp.ndarray:
-                return f(t, x) + jnp.dot(cov(t, x), score_fn(t, x))
+                reversed_t = 1.0 - t
+                return f(t=reversed_t, x=x) + jnp.dot(cov(t=reversed_t, x=x), score_fn(t=reversed_t, x=x))
             
             def g(self, t: float, x: jnp.ndarray) -> jnp.ndarray:
-                return g(t, x)
+                reversed_t = 1.0 - t
+                return g(t=reversed_t, x=x)
             
             def covariance(self, t: float, x: jnp.ndarray) -> jnp.ndarray:
-                return cov(t, x)
+                reversed_t = 1.0 - t
+                return cov(t=reversed_t, x=x)
             
             def inv_covariance(self, t: float, x: jnp.ndarray) -> jnp.ndarray:
-                return jnp.linalg.inv(cov(t, x))
+                reversed_t = 1.0 - t
+                return jnp.linalg.inv(cov(t=reversed_t, x=x))
         
         return ReverseSDE()
     
 class BrownianSDE(SDE):
-    def __init__(self, dim: int, sigma: float = 1.0):
+    def __init__(self, sigma: float = 1.0):
         super().__init__()
-        self.dim = dim
         self.sigma = sigma
 
     def f(self, t: float, x: jnp.ndarray) -> jnp.ndarray:
         return jnp.zeros_like(x)
     
     def g(self, t: float, x: jnp.ndarray) -> jnp.ndarray:
-        return self.sigma * jnp.eye(self.dim)
+        return self.sigma * jnp.eye(x.shape[-1])
     
     def covariance(self, t: float, x: jnp.ndarray) -> jnp.ndarray:
-        return self.sigma**2 * jnp.eye(self.dim)
+        return self.sigma**2 * jnp.eye(x.shape[-1])
 
     def inv_covariance(self, t: float, x: jnp.ndarray) -> jnp.ndarray:
-        return 1.0 / self.sigma**2 * jnp.eye(self.dim)
+        return 1.0 / self.sigma**2 * jnp.eye(x.shape[-1])

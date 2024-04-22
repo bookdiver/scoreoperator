@@ -51,10 +51,10 @@ class TrainerModule:
             raise NotImplementedError
 
     def create_diffuser_loader(self):
-        diffuser = Diffuser(
+        self.diffuser = Diffuser(
             self.seed, self.sde, self.diffusion_dt
         )
-        self.dataloader = diffuser.get_trajectory_generator(
+        self.dataloader = self.diffuser.get_trajectory_generator(
             x0=jnp.zeros(self.sde.dim),
             batch_size=self.batch_size
         )

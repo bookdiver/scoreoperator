@@ -22,10 +22,10 @@ def get_default_config() -> ml_collections.ConfigDict:
     config.training = training = ml_collections.ConfigDict()
     training.seed = 0
     training.learning_rate = 1e-3
-    training.batch_size = 8
+    training.batch_size = 16
     training.optimizer_name = "adam"
     training.warmup_steps = 1000
     training.train_num_epochs = 100
-    training.train_num_steps_per_epoch = 100
+    training.train_num_steps_per_epoch = 50
 
     return config

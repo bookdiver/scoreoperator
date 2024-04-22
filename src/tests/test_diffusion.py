@@ -1,7 +1,7 @@
 from jax import random
 import jax.numpy as jnp
 
-from ..models.diffusion.diffusion import Diffusion
+from ..models.diffusion.diffusion import Diffuser
 from ..models.diffusion.sde import BrownianSDE
 
 def test_diffusion_solve_sde():
@@ -39,19 +39,29 @@ def test_diffusion_solve_reverse_bridge_sde():
 
 def test_diffusion_get_trajectory_generator():
     seed = 0
-    dim = 2
+    dim = 32
     sde = BrownianSDE(dim=dim, sigma=1.0)
     dt = 1e-2
-    diffusion = Diffusion(seed, sde, dt)
+    diffusion = Diffuser(seed, sde, dt)
 
-    x0 = jnp.array([0.0, 0.0])
+    x0 = jnp.zeros(dim)
     batch_size = 64
-    generator = diffusion.get_trajectory_generator(x0, batch_size)
+    # generator = diffusion.get_trajectory_generator(x0, batch_size)
+    generator = diffusion.get_trajectory_generator_vmap(x0, batch_size)
 
-    for _ in range(10):
-        xs, ts, grads = next(generator)
+    # xss, tss, covss, gradss = next(generator)
+
+    # # Assert the shapes of the outputs
+    # assert xss.shape == (batch_size, 100, dim)
+    # assert tss.shape == (batch_size, 100)
+    # assert gradss.shape == (batch_size, 100, dim)
+
+
+    for _ in range(50):
+        print("Iteration")
+        xss, tss, covss, gradss = next(generator)
 
         # Assert the shapes of the outputs
-        assert xs.shape == (batch_size, 100, 2)
-        assert ts.shape == (batch_size, 100)
-        assert grads.shape == (batch_size, 99, 2)
+        assert xss.shape == (batch_size, 100, dim)
+        assert tss.shape == (batch_size, 100)
+        assert gradss.shape == (batch_size, 100, dim)
