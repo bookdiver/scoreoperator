@@ -1,22 +1,57 @@
-import jax
+from jax import random
 import jax.numpy as jnp
 
-from ..data.synthetic_shapes import Circle
-from ..models.diffusion.sde import BrownianSDE, VPSDE
-from ..models.diffusion.gaussian_process import GaussianProcess
-from ..models.diffusion.diffusion import DiffusionLoader
+from ..models.diffusion.diffusion import Diffusion
+from ..models.diffusion.sde import BrownianSDE
 
-def test_brownian_diffusion():
-    gp = GaussianProcess(input_dim=1, output_dim=2, n_sample_pts=16, kernel_type='delta', sigma=1.0)
-    sde = BrownianSDE(gp, sigma=1.0)
-    init_cond = Circle().sample(n_pts=16)
-    loader = DiffusionLoader(sde, seed=0, init_cond=init_cond, batch_size=4, shuffle=True)
-    xs, ts, zs = next(loader)
-    assert xs.shape == (4, 16, 2)
-    assert ts.shape == (4, )
-    assert zs.shape == (4, 16, 2)
+def test_diffusion_solve_sde():
+    seed = 0
+    dim = 2
+    sde = BrownianSDE(dim=dim, sigma=1.0)
+    dt = 1e-2
+    diffusion = Diffusion(seed, sde, dt)
 
-    xs_next, ts_next, zs_next = next(loader)
-    assert jnp.all(xs != xs_next)
-    assert jnp.all(ts != ts_next)
-    assert jnp.all(zs != zs_next)
+    rng_key = random.PRNGKey(seed)
+    x0 = jnp.array([0.0, 0.0])
+    xs, ts, grads = diffusion.solve_sde(rng_key, x0)
+
+    # Assert the shapes of the outputs
+    assert xs.shape == (100, 2)
+    assert ts.shape == (100,)
+    assert grads.shape == (99, 2)
+
+def test_diffusion_solve_reverse_bridge_sde():
+    seed = 0
+    dim = 2
+    sde = BrownianSDE(dim=dim, sigma=1.0)
+    dt = 1e-2
+    diffusion = Diffusion(seed, sde, dt)
+
+    rng_key = random.PRNGKey(seed)
+    x0 = jnp.array([0.0, 0.0])
+    score_fn = lambda t, x: x / (1.0 - t)
+    xs, ts = diffusion.solve_reverse_bridge_sde(rng_key, x0, score_fn=score_fn)
+
+    # Assert the shapes of the outputs
+    assert xs.shape == (100, 2)
+    assert ts.shape == (100,)
+
+
+def test_diffusion_get_trajectory_generator():
+    seed = 0
+    dim = 2
+    sde = BrownianSDE(dim=dim, sigma=1.0)
+    dt = 1e-2
+    diffusion = Diffusion(seed, sde, dt)
+
+    x0 = jnp.array([0.0, 0.0])
+    batch_size = 64
+    generator = diffusion.get_trajectory_generator(x0, batch_size)
+
+    for _ in range(10):
+        xs, ts, grads = next(generator)
+
+        # Assert the shapes of the outputs
+        assert xs.shape == (batch_size, 100, 2)
+        assert ts.shape == (batch_size, 100)
+        assert grads.shape == (batch_size, 99, 2)
