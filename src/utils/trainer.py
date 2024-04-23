@@ -8,7 +8,7 @@ from tqdm import tqdm
 from ..models.neuralop.uno import UNO1D
 from ..models.diffusion.loss import dsm_loss
 from ..models.diffusion.diffusion import Diffuser
-from ..models.diffusion.sde import BrownianSDE
+from ..models.diffusion.sde import BrownianSDE, EulerianSDE
 
 class TrainState(train_state.TrainState):
     batch_stats: dict
@@ -32,6 +32,7 @@ class TrainerModule:
 
         # Training
         self.seed = config.training.seed
+        self.n_pts = config.training.n_pts
         self.learning_rate = config.training.learning_rate
         self.batch_size = config.training.batch_size
         self.optimizer_name = config.training.optimizer_name
@@ -47,15 +48,17 @@ class TrainerModule:
     def create_sde(self):
         if self.sde_name == "brownian":
             self.sde = BrownianSDE(**self.config.sde)
+        elif self.sde_name == "eulerian":
+            self.sde = EulerianSDE(**self.config.sde)
         else:
-            raise NotImplementedError
+            raise NotImplementedError(f"{self.sde_name} has not implemented!")
 
     def create_diffuser_loader(self):
         self.diffuser = Diffuser(
             self.seed, self.sde, self.diffusion_dt
         )
         self.dataloader = self.diffuser.get_trajectory_generator(
-            x0=jnp.zeros(self.sde.dim),
+            x0=jnp.zeros(self.n_pts*2),
             batch_size=self.batch_size
         )
 

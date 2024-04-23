@@ -39,15 +39,14 @@ def test_diffusion_solve_reverse_bridge_sde():
 
 def test_diffusion_get_trajectory_generator():
     seed = 0
-    dim = 32
-    sde = BrownianSDE(dim=dim, sigma=1.0)
+    sde = BrownianSDE(sigma=1.0)
     dt = 1e-2
     diffusion = Diffuser(seed, sde, dt)
 
-    x0 = jnp.zeros(dim)
+    x0 = jnp.zeros(32)
     batch_size = 64
     # generator = diffusion.get_trajectory_generator(x0, batch_size)
-    generator = diffusion.get_trajectory_generator_vmap(x0, batch_size)
+    generator = diffusion.get_trajectory_generator(x0, batch_size)
 
     # xss, tss, covss, gradss = next(generator)
 
@@ -57,11 +56,11 @@ def test_diffusion_get_trajectory_generator():
     # assert gradss.shape == (batch_size, 100, dim)
 
 
-    for _ in range(50):
+    for _ in range(100):
         print("Iteration")
         xss, tss, covss, gradss = next(generator)
 
         # Assert the shapes of the outputs
-        assert xss.shape == (batch_size, 100, dim)
+        assert xss.shape == (batch_size, 100, 32)
         assert tss.shape == (batch_size, 100)
-        assert gradss.shape == (batch_size, 100, dim)
+        assert gradss.shape == (batch_size, 100, 32)

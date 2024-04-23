@@ -5,7 +5,6 @@ def get_default_config() -> ml_collections.ConfigDict:
     config.sde_name = "brownian"
 
     config.sde = sde = ml_collections.ConfigDict()
-    sde.dim = 32
     sde.sigma = 1.0
 
     config.diffusion = diffusion = ml_collections.ConfigDict()
@@ -20,6 +19,7 @@ def get_default_config() -> ml_collections.ConfigDict:
     model.norm = "batch"
 
     config.training = training = ml_collections.ConfigDict()
+    training.n_pts = 16
     training.seed = 0
     training.learning_rate = 1e-3
     training.batch_size = 16

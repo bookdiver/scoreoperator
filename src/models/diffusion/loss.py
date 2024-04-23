@@ -6,7 +6,7 @@ def weighted_square_norm(x: jnp.ndarray, w: jnp.ndarray):
 
 def dsm_loss(predss: jnp.ndarray, gradss: jnp.ndarray, covss: jnp.ndarray, dt: float):
     # preds: (b_size, t_size, d_size), grads: (b_size, t_size, d_size), covs: (b_size, t_size, d_size, d_size)
-    losses = jax.vmap(jax.vmap(weighted_square_norm))(predss+gradss, covss) * dt   # (b_size, t_size)
-    losses = jnp.sum(losses, axis=1)    # (b_size,)
-    loss = jnp.mean(losses)   # ()
+    losses = jax.vmap(jax.vmap(weighted_square_norm))(predss+gradss, covss)  # (b_size, t_size)
+    losses = jnp.mean(losses, axis=1)    # (b_size,)
+    loss = 0.5 * dt * jnp.mean(losses)   # ()
     return loss
