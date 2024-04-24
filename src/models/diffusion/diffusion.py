@@ -44,15 +44,18 @@ class Diffuser:
         xs, ts = sol.ys, sol.ts
         
         diff_xs = xs[1:] - xs[:-1]
-        covs_prev = jax.vmap(lambda t, x: self.sde.covariance(t, x))(ts[:-1], xs[:-1])
+        # covs_prev = jax.vmap(lambda t, x: self.sde.covariance(t, x))(ts[:-1], xs[:-1])
+        g_prev = jax.vmap(lambda t, x: self.sde.g(t, x))(ts[:-1], xs[:-1])
         covs_now = jax.vmap(lambda t, x: self.sde.covariance(t, x))(ts[1:], xs[1:])
-        inv_covs = jax.vmap(jnp.linalg.pinv)(covs_prev)
-        grads = jax.vmap(lambda inv_cov, diff_x: jnp.dot(inv_cov, diff_x))(inv_covs, diff_xs) / self.dt
+        # inv_covs = jax.vmap(jnp.linalg.inv)(covs_prev)
+        inv_stds = jax.vmap(jnp.linalg.inv)(g_prev)
+        # grads = jax.vmap(lambda inv_cov, diff_x: jnp.dot(inv_cov, diff_x))(inv_covs, diff_xs) / self.dt
+        grads = jax.vmap(lambda inv_std, diff_x: jnp.dot(inv_std, diff_x))(inv_stds, diff_xs) / jnp.sqrt(self.dt)
 
         return xs[1:], ts[1:], covs_now, grads
     
-    @partial(jax.jit, static_argnums=(0, 2), static_argnames=("score_fn",))
-    def solve_reverse_bridge_sde(self, rng_key: jax.Array, x0: jnp.ndarray, n_steps: int=100, *, score_fn: Callable[[float, jnp.ndarray], jnp.ndarray]=None) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    @partial(jax.jit, static_argnums=(0, 2, 3), static_argnames=("score_fn",))
+    def solve_reverse_bridge_sde(self, rng_key: jax.Array, x0: jnp.ndarray, n_steps: int, *, score_fn: Callable[[float, jnp.ndarray], jnp.ndarray]=None) -> Tuple[jnp.ndarray, jnp.ndarray]:
         self.get_reverse_diffusion_bridge(score_fn)
 
         # brownian = VirtualBrownianTree(
@@ -64,7 +67,7 @@ class Diffuser:
             ControlTerm(lambda t, y, _: self.reverse_diffusion_bridge_sde.g(t, y), brownian)
         )
         solver = Euler()
-        saveat = SaveAt(ts=jnp.linspace(0.0, 1.0, 500))
+        saveat = SaveAt(ts=jnp.linspace(0.0, 1.0, 200))
         # sol = diffeqsolve(terms, solver, t0=0.0, t1=1.0, dt0=self.dt, saveat=saveat, y0=x0)
         sol = diffeqsolve(terms, solver, t0=0.0, t1=1.0, dt0=self.dt, saveat=saveat, y0=x0, adjoint=DirectAdjoint())
 

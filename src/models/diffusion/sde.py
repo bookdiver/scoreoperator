@@ -31,7 +31,10 @@ class SDE(abc.ABC):
 
             def f(self, t: float, x: jnp.ndarray) -> jnp.ndarray:
                 reversed_t = 1.0 - t
-                return f(t=reversed_t, x=x) + jnp.dot(cov(t=reversed_t, x=x), score_fn(t=reversed_t, x=x))
+                # return -f(t=reversed_t, x=x) + jnp.dot(cov(t=reversed_t, x=x), score_fn(t=reversed_t, x=x))
+                inv_g = jnp.linalg.inv(g(t=reversed_t, x=x).T) / jnp.sqrt(reversed_t)
+                score = jnp.dot(inv_g, score_fn(t=reversed_t, x=x))
+                return -f(t=reversed_t, x=x) + jnp.dot(cov(t=reversed_t, x=x), score)
             
             def g(self, t: float, x: jnp.ndarray, **kwargs) -> jnp.ndarray:
                 reversed_t = 1.0 - t
@@ -76,7 +79,7 @@ class EulerianSDE(SDE):
         x = x + self.s0.sample(n_pts)
         kernel_fn = lambda x: self.sigma * jnp.exp(-0.5 * jnp.sum(jnp.square(x), axis=-1) / self.kappa**2)
         dist = x[:, None, :] - x[None, :, :]
-        kernel = kernel_fn(dist)
+        kernel = kernel_fn(dist) + 1e-4 * jnp.eye(n_pts)
         Q_half = jnp.einsum("ij,kl->ikjl", kernel, jnp.eye(2))
         Q_half = Q_half.reshape(2*n_pts, 2*n_pts)
         return Q_half

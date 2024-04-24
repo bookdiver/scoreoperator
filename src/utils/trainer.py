@@ -197,7 +197,6 @@ class TrainerModule:
     def save_model(self, save_dir, prefix, step=0):
         checkpoints.save_checkpoint(ckpt_dir=save_dir,
                                     target={
-                                        "model": self.config.model.to_dict(),
                                         "params": self.state.params,
                                         "batch_stats": self.state.batch_stats
                                     },
@@ -209,7 +208,7 @@ class TrainerModule:
         ckpt = checkpoints.restore_checkpoint(ckpt_dir=load_dir, 
                                               target=None,
                                               prefix=prefix)
-        model = self.model_cls(**ckpt["model"])
+        model = UNO1D(**self.config.model)
         self.state = TrainState.create(apply_fn=model.apply,
                                        params=ckpt["params"],
                                        batch_stats=ckpt["batch_stats"],
