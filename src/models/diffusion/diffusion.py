@@ -4,7 +4,9 @@ from functools import partial
 import jax
 import jax.numpy as jnp
 
-from diffrax import VirtualBrownianTree, UnsafeBrownianPath, DirectAdjoint, MultiTerm, ODETerm, ControlTerm, Euler, SaveAt, diffeqsolve
+from diffrax import (UnsafeBrownianPath, DirectAdjoint, 
+                     MultiTerm, ODETerm, 
+                     ControlTerm, Euler, SaveAt, diffeqsolve)
 from .sde import SDE
 
 class Diffuser:
@@ -28,9 +30,6 @@ class Diffuser:
     
     @partial(jax.jit, static_argnums=(0,))
     def solve_sde(self, rng_key: jax.Array, x0: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-        # brownian = VirtualBrownianTree(
-        #     t0=0.0, t1=1.0, tol=1e-3, shape=(x0.shape[-1], ), key=rng_key
-        # )
         brownian = UnsafeBrownianPath(shape=(x0.shape[-1], ), key=rng_key)
         terms = MultiTerm(
             ODETerm(lambda t, y, _: self.sde.f(t, y)),
@@ -38,51 +37,42 @@ class Diffuser:
         )
         solver = Euler()
         saveat = SaveAt(ts=jnp.arange(0.0, 1.0+self.dt, self.dt))
-        # sol = diffeqsolve(terms, solver, t0=0.0, t1=1.0, dt0=self.dt, saveat=saveat, y0=x0)
         sol = diffeqsolve(terms, solver, t0=0.0, t1=1.0, dt0=self.dt, saveat=saveat, y0=x0, adjoint=DirectAdjoint())
 
         xs, ts = sol.ys, sol.ts
         
         diff_xs = xs[1:] - xs[:-1]
-        # covs_prev = jax.vmap(lambda t, x: self.sde.covariance(t, x))(ts[:-1], xs[:-1])
         g_prev = jax.vmap(lambda t, x: self.sde.g(t, x))(ts[:-1], xs[:-1])
-        covs_now = jax.vmap(lambda t, x: self.sde.covariance(t, x))(ts[1:], xs[1:])
-        # inv_covs = jax.vmap(jnp.linalg.inv)(covs_prev)
-        inv_stds = jax.vmap(jnp.linalg.inv)(g_prev)
-        # grads = jax.vmap(lambda inv_cov, diff_x: jnp.dot(inv_cov, diff_x))(inv_covs, diff_xs) / self.dt
-        grads = jax.vmap(lambda inv_std, diff_x: jnp.dot(inv_std, diff_x))(inv_stds, diff_xs) / jnp.sqrt(self.dt)
+        inv_stds = jax.vmap(jnp.linalg.inv)(g_prev) / jnp.sqrt(self.dt)
+        grads = jax.vmap(lambda inv_std, diff_x: jnp.dot(inv_std, diff_x))(inv_stds, diff_xs)
 
-        return xs[1:], ts[1:], covs_now, grads
+        return xs[1:], ts[1:], grads
     
     @partial(jax.jit, static_argnums=(0, 2, 3), static_argnames=("score_fn",))
-    def solve_reverse_bridge_sde(self, rng_key: jax.Array, x0: jnp.ndarray, n_steps: int, *, score_fn: Callable[[float, jnp.ndarray], jnp.ndarray]=None) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    def solve_reverse_bridge_sde(self, rng_key: jax.Array, x0: jnp.ndarray, ts: jnp.ndarray, *, score_fn: Callable[[float, jnp.ndarray], jnp.ndarray]=None) -> Tuple[jnp.ndarray, jnp.ndarray]:
         self.get_reverse_diffusion_bridge(score_fn)
 
-        # brownian = VirtualBrownianTree(
-        #     t0=0.0, t1=1.0, tol=1e-3, shape=(x0.shape[-1], ), key=rng_key
-        # )
         brownian = UnsafeBrownianPath(shape=(x0.shape[-1], ), key=rng_key)
         terms = MultiTerm(
             ODETerm(lambda t, y, _: self.reverse_diffusion_bridge_sde.f(t, y)),
             ControlTerm(lambda t, y, _: self.reverse_diffusion_bridge_sde.g(t, y), brownian)
         )
         solver = Euler()
-        saveat = SaveAt(ts=jnp.linspace(0.0, 1.0, 200))
-        # sol = diffeqsolve(terms, solver, t0=0.0, t1=1.0, dt0=self.dt, saveat=saveat, y0=x0)
+        saveat = SaveAt(ts=ts)
         sol = diffeqsolve(terms, solver, t0=0.0, t1=1.0, dt0=self.dt, saveat=saveat, y0=x0, adjoint=DirectAdjoint())
 
         xs, ts = sol.ys, sol.ts
         return xs, ts
 
-    def get_trajectory_generator(self, x0: jnp.ndarray, batch_size: int) -> Generator[Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray], None, None]:
+    def get_trajectory_generator(self, x0: jnp.ndarray, batch_size: int) -> Generator[Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray], None, None]:
         
         solve_sde = jax.vmap(self.solve_sde, in_axes=(0, None))
         def generator():
             while True:
                 rng_keys = jax.random.split(self.rng_key, batch_size + 1)
-                xss, tss, covss, gradss = solve_sde(rng_keys[1:], x0)
+                xss, tss,  gradss = solve_sde(rng_keys[1:], x0)
                 self.rng_key = rng_keys[0]
-                yield xss, tss, covss, gradss
+                yield xss, tss, gradss
         return generator()
 
     

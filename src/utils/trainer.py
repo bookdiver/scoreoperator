@@ -3,7 +3,10 @@ import jax.numpy as jnp
 from flax.training import train_state, checkpoints
 import optax
 from tqdm import tqdm
+import absl
 # import wandb
+
+absl.logging.set_verbosity(absl.logging.ERROR)
 
 from ..models.neuralop.uno import UNO1D
 from ..models.diffusion.loss import dsm_loss
@@ -65,7 +68,7 @@ class TrainerModule:
     def create_functions(self):
         
         def compute_loss(params, batch_stats, batch, train):
-            xss, tss, covss, gradss = batch # (b_size, t_size, d_size)
+            xss, tss, gradss = batch # (b_size, t_size, d_size)
             b_size, t_size, d_size = xss.shape
             xs = xss.reshape(b_size*t_size, d_size//2, 2)
             ts = tss.reshape(b_size*t_size, )
@@ -80,7 +83,7 @@ class TrainerModule:
 
             preds, new_model_state = outs if train else (outs, None)
             predss = preds.reshape(b_size, t_size, d_size)
-            loss = dsm_loss(predss, gradss, covss, dt=self.diffusion_dt)
+            loss = dsm_loss(predss, gradss, dt=self.diffusion_dt)
             return loss, new_model_state
     
         def train_step(state, batch):
@@ -91,7 +94,7 @@ class TrainerModule:
             return state, loss
         
         def eval_step(state, batch):
-            xss, tss, covss, gradss = batch # (b_size, t_size, d_size)
+            xss, tss, gradss = batch # (b_size, t_size, d_size)
             b_size, t_size, d_size = xss.shape
             xs = xss.reshape(b_size*t_size, d_size//2, 2)
             ts = tss.reshape(b_size*t_size, )
@@ -103,13 +106,13 @@ class TrainerModule:
                 mutable=False
             )
             predss = preds.reshape(b_size, t_size, d_size)
-            return dsm_loss(predss, gradss, covss, dt=self.diffusion_dt)
+            return dsm_loss(predss, gradss, dt=self.diffusion_dt)
         
         self.train_step = jax.jit(train_step)
         self.eval_step = jax.jit(eval_step)
 
     def init_model(self):
-        xss, tss, _, _ = next(self.dataloader)
+        xss, tss, _ = next(self.dataloader)
         b_size, t_size, d_size = xss.shape
         xs = xss.reshape(b_size*t_size, d_size//2, 2)
         ts = tss.reshape(b_size*t_size, )
@@ -144,7 +147,7 @@ class TrainerModule:
             raise NotImplementedError(f"{self.optimizer_name} has not implemented!")
         
         optimizer = optax.chain(
-            optax.clip(1.0),
+            # optax.clip(1.0),
             opt_class(lr_schedule)
         )
         self.state = TrainState.create(
