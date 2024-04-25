@@ -1,13 +1,17 @@
-import os
-import warnings
-warnings.filterwarnings("ignore")
-
 import jax
 import jax.numpy as jnp
 from flax.training import train_state, checkpoints
 import optax
 from tqdm import tqdm
+import absl
 # import wandb
+
+absl.logging.set_verbosity(absl.logging.ERROR)
+
+from ..models.neuralop.uno import UNO1D
+from ..models.diffusion.loss import dsm_loss
+from ..models.diffusion.diffusion import Diffuser
+from ..models.diffusion.sde import BrownianSDE, EulerianSDE
 
 class TrainState(train_state.TrainState):
     batch_stats: dict
@@ -17,43 +21,57 @@ class TrainerModule:
 
     def __init__(self,
                  config,
-                 model,
-                 dataloader,
-                 enable_wandb,
                 ):
-        
-        self.seed = config.seed
-        self.learning_rate = config.learning_rate
-        self.optimizer_name = config.optimizer_name
-        self.warmup_steps = config.warmup_steps if hasattr(config, "warmup_steps") else 0
-        self.train_num_epochs = config.train_num_epochs
-        self.train_num_steps_per_epoch = config.train_num_steps_per_epoch
+        self.config = config
 
-        self.model = model
-        self.dataloader = dataloader
+        # SDE
+        self.sde_name = config.sde_name
 
-        self.enable_wandb = enable_wandb
+        # Diffusion
+        self.diffusion_dt = config.diffusion.dt
 
+        # Model
+        self.model = UNO1D(**config.model)
+
+        # Training
+        self.seed = config.training.seed
+        self.n_pts = config.training.n_pts
+        self.learning_rate = config.training.learning_rate
+        self.batch_size = config.training.batch_size
+        self.optimizer_name = config.training.optimizer_name
+        self.warmup_steps = config.training.warmup_steps if hasattr(config.training, "warmup_steps") else 0
+        self.train_num_epochs = config.training.train_num_epochs
+        self.train_num_steps_per_epoch = config.training.train_num_steps_per_epoch
+
+        self.create_sde()
+        self.create_diffuser_loader()
         self.create_functions()
         self.init_model()
 
-    @staticmethod
-    def dsm_loss(preds, zs, sigmas):
-        zs = jax.vmap(lambda x, y: x * y)(zs, 1.0 / sigmas)
-        # preds = jax.vmap(lambda x, y: x * y)(preds, sigmas)
-        loss = jnp.mean(
-            jnp.mean(
-                jnp.sum((preds + zs)**2, axis=-1),
-                axis=-1
-            ),
-            axis=0
+    def create_sde(self):
+        if self.sde_name == "brownian":
+            self.sde = BrownianSDE(**self.config.sde)
+        elif self.sde_name == "eulerian":
+            self.sde = EulerianSDE(**self.config.sde)
+        else:
+            raise NotImplementedError(f"{self.sde_name} has not implemented!")
+
+    def create_diffuser_loader(self):
+        self.diffuser = Diffuser(
+            self.seed, self.sde, self.diffusion_dt
         )
-        return loss
-    
+        self.dataloader = self.diffuser.get_trajectory_generator(
+            x0=jnp.zeros(self.n_pts*2),
+            batch_size=self.batch_size
+        )
+
     def create_functions(self):
         
         def compute_loss(params, batch_stats, batch, train):
-            xs, ts, zs, sigmas = batch
+            xss, tss, gradss = batch # (b_size, t_size, d_size)
+            b_size, t_size, d_size = xss.shape
+            xs = xss.reshape(b_size*t_size, d_size//2, 2)
+            ts = tss.reshape(b_size*t_size, )
 
             outs = self.model.apply(
                 {"params": params, "batch_stats": batch_stats},
@@ -64,7 +82,8 @@ class TrainerModule:
             )
 
             preds, new_model_state = outs if train else (outs, None)
-            loss = self.dsm_loss(preds, zs, sigmas)
+            predss = preds.reshape(b_size, t_size, d_size)
+            loss = dsm_loss(predss, gradss, dt=self.diffusion_dt)
             return loss, new_model_state
     
         def train_step(state, batch):
@@ -75,7 +94,10 @@ class TrainerModule:
             return state, loss
         
         def eval_step(state, batch):
-            xs, ts, zs, sigmas = batch
+            xss, tss, gradss = batch # (b_size, t_size, d_size)
+            b_size, t_size, d_size = xss.shape
+            xs = xss.reshape(b_size*t_size, d_size//2, 2)
+            ts = tss.reshape(b_size*t_size, )
             preds = state.apply_fn(
                 {"params": state.params, "batch_stats": state.batch_stats},
                 xs,
@@ -83,13 +105,17 @@ class TrainerModule:
                 train=False,
                 mutable=False
             )
-            return self.dsm_loss(preds, zs, sigmas)
+            predss = preds.reshape(b_size, t_size, d_size)
+            return dsm_loss(predss, gradss, dt=self.diffusion_dt)
         
         self.train_step = jax.jit(train_step)
         self.eval_step = jax.jit(eval_step)
 
     def init_model(self):
-        xs, ts, _, _ = next(self.dataloader)
+        xss, tss, _ = next(self.dataloader)
+        b_size, t_size, d_size = xss.shape
+        xs = xss.reshape(b_size*t_size, d_size//2, 2)
+        ts = tss.reshape(b_size*t_size, )
         init_rng_key = jax.random.PRNGKey(self.seed)
         variables = self.model.init(init_rng_key, xs, ts, train=True)
         self.init_params = variables["params"]
@@ -121,7 +147,7 @@ class TrainerModule:
             raise NotImplementedError(f"{self.optimizer_name} has not implemented!")
         
         optimizer = optax.chain(
-            optax.clip(1.0),
+            # optax.clip(1.0),
             opt_class(lr_schedule)
         )
         self.state = TrainState.create(
@@ -153,11 +179,11 @@ class TrainerModule:
                     eval_batch = next(self.dataloader)
                     eval_loss = self.eval_step(self.state, eval_batch)
                     
-                    if self.enable_wandb:
-                        wandb.log({
-                            "train_avg_loss": epoch_avg_loss,
-                            "eval_loss": eval_loss 
-                        }, step=epoch)
+                    # if self.enable_wandb:
+                    #     wandb.log({
+                    #         "train_avg_loss": epoch_avg_loss,
+                    #         "eval_loss": eval_loss 
+                    #     }, step=epoch)
                     pbar.set_postfix(Epoch=epoch, train_loss=f"{epoch_avg_loss:.4f}", eval_loss=f"{eval_loss:.4f}")
 
     def infer_model(self, batch):
@@ -182,11 +208,12 @@ class TrainerModule:
                                     overwrite=True)
     
     def load_model(self, load_dir, prefix):
-        state_dict = checkpoints.restore_checkpoint(ckpt_dir=load_dir, 
-                                                    target=None,
-                                                    prefix=prefix)
-        self.state = TrainState.create(apply_fn=self.model.apply,
-                                       params=state_dict["params"],
-                                       batch_stats=state_dict["batch_stats"],
+        ckpt = checkpoints.restore_checkpoint(ckpt_dir=load_dir, 
+                                              target=None,
+                                              prefix=prefix)
+        model = UNO1D(**self.config.model)
+        self.state = TrainState.create(apply_fn=model.apply,
+                                       params=ckpt["params"],
+                                       batch_stats=ckpt["batch_stats"],
                                        tx=self.state.tx if self.state else optax.sgd(0.1))
         print(f"Model loaded from {load_dir}")
