@@ -1,10 +1,11 @@
+from typing import Union
 from .shape import Shape
 
 import jax.numpy as jnp
 
 class Circle(Shape):
-    def __init__(self, r: float=1.0, shift_x: float=0.0, shift_y: float=0.0):
-        self.r = r
+    def __init__(self, r: Union[float, str]=1.0, shift_x: float=0.0, shift_y: float=0.0):
+        self.r = float(r)
         self.shift_x = shift_x
         self.shift_y = shift_y
     

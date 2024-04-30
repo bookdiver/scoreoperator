@@ -5,8 +5,8 @@ import jax.numpy as jnp
 from .shape import Shape
 
 class Butterfly(Shape):
-    def __init__(self, load_name: str, interpolation: int = 0, interpolation_type: str = "cubic"):
-        self.pts = np.load("./src/data/raw/"+f"{load_name}.npy")
+    def __init__(self, name: str, interpolation: int = 512, interpolation_type: str = "linear"):
+        self.pts = np.load("./src/data/raw/"+f"{name}.npy")
 
         ts = np.linspace(0, 1., len(self.pts))
         if interpolation and interpolation > len(self.pts):

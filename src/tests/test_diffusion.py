@@ -1,7 +1,7 @@
 from jax import random
 import jax.numpy as jnp
 
-from ..models.diffusion.diffusion import Diffuser
+from ..models.diffusion.diffuser import Diffuser
 from ..models.diffusion.sde import BrownianSDE
 
 def test_diffusion_solve_sde():

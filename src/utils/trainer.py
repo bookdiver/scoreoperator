@@ -9,9 +9,8 @@ import absl
 absl.logging.set_verbosity(absl.logging.ERROR)
 
 from ..models.neuralop.uno import UNO1D
-from ..models.diffusion.loss import dsm_loss
-from ..models.diffusion.diffusion import Diffuser
-from ..models.diffusion.sde import BrownianSDE, EulerianSDE
+from ..models.diffusion.diffuser import Diffuser
+from ..models.diffusion.sde import BrownianSDE, EulerianSDE, EulerianSDELandmarkIndependent
 
 class TrainState(train_state.TrainState):
     batch_stats: dict
@@ -29,6 +28,7 @@ class TrainerModule:
 
         # Diffusion
         self.diffusion_dt = config.diffusion.dt
+        self.scaling = config.diffusion.scaling
 
         # Model
         self.model = UNO1D(**config.model)
@@ -53,6 +53,8 @@ class TrainerModule:
             self.sde = BrownianSDE(**self.config.sde)
         elif self.sde_name == "eulerian":
             self.sde = EulerianSDE(**self.config.sde)
+        elif self.sde_name == "eulerian_ind":
+            self.sde = EulerianSDELandmarkIndependent(**self.config.sde)
         else:
             raise NotImplementedError(f"{self.sde_name} has not implemented!")
 
@@ -83,7 +85,7 @@ class TrainerModule:
 
             preds, new_model_state = outs if train else (outs, None)
             predss = preds.reshape(b_size, t_size, d_size)
-            loss = dsm_loss(predss, gradss, dt=self.diffusion_dt)
+            loss = self.diffuser.dsm_loss(predss, gradss)
             return loss, new_model_state
     
         def train_step(state, batch):
@@ -106,7 +108,7 @@ class TrainerModule:
                 mutable=False
             )
             predss = preds.reshape(b_size, t_size, d_size)
-            return dsm_loss(predss, gradss, dt=self.diffusion_dt)
+            return self.diffuser.dsm_loss(predss, gradss, dt=self.diffusion_dt)
         
         self.train_step = jax.jit(train_step)
         self.eval_step = jax.jit(eval_step)
@@ -179,11 +181,6 @@ class TrainerModule:
                     eval_batch = next(self.dataloader)
                     eval_loss = self.eval_step(self.state, eval_batch)
                     
-                    # if self.enable_wandb:
-                    #     wandb.log({
-                    #         "train_avg_loss": epoch_avg_loss,
-                    #         "eval_loss": eval_loss 
-                    #     }, step=epoch)
                     pbar.set_postfix(Epoch=epoch, train_loss=f"{epoch_avg_loss:.4f}", eval_loss=f"{eval_loss:.4f}")
 
     def infer_model(self, batch):
