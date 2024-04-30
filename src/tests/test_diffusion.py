@@ -9,11 +9,11 @@ def test_diffusion_solve_sde():
     dim = 2
     sde = BrownianSDE(dim=dim, sigma=1.0)
     dt = 1e-2
-    diffusion = Diffusion(seed, sde, dt)
+    diffuser = Diffuser(seed, sde, dt)
 
     rng_key = random.PRNGKey(seed)
     x0 = jnp.array([0.0, 0.0])
-    xs, ts, grads = diffusion.solve_sde(rng_key, x0)
+    xs, ts, grads = diffuser.solve_sde(rng_key, x0)
 
     # Assert the shapes of the outputs
     assert xs.shape == (100, 2)

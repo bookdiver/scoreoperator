@@ -9,6 +9,7 @@ def get_default_config() -> ml_collections.ConfigDict:
 
     config.diffusion = diffusion = ml_collections.ConfigDict()
     diffusion.dt = 1e-2
+    diffusion.approximator = "score"
 
     config.model = model = ml_collections.ConfigDict()
     model.out_co_dim = 2

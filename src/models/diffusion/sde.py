@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import abc
-from typing import Callable, Tuple
+from typing import Tuple
 
 import jax
 import jax.numpy as jnp
 
 from ...data.shape import Shape
-from ...utils.util import Approximator
 
 class SDE(abc.ABC):
 
@@ -30,7 +29,7 @@ class SDE(abc.ABC):
         g2 = self.g2(t, x, **kwargs)
         return jnp.linalg.inv(g2)
     
-    def get_reverse_bridge(self, approx: Approximator) -> SDE:
+    def get_reverse_bridge(self, approx) -> SDE:
         f = self.f
         g = self.g
         g2 = self.g2

@@ -3,6 +3,8 @@ from .default_config import get_default_config
 def get_circles_brownian_config():
     config = get_default_config()
 
+    config.diffusion.approximator = "g2score"
+
     config.model.out_co_dim = 2
     config.model.lifting_dim = 16
     config.model.co_dims_fmults = [1, 2, 4]
