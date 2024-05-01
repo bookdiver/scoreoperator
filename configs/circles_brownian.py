@@ -11,4 +11,6 @@ def get_circles_brownian_config():
     config.model.n_modes_per_layer = [8, 6, 4]
     config.model.act = "gelu"
     config.model.norm = "batch"
+    
+    config.training.warmup_steps = 5
     return config

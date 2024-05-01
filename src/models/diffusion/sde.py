@@ -29,19 +29,19 @@ class SDE(abc.ABC):
         g2 = self.g2(t, x, **kwargs)
         return jnp.linalg.inv(g2)
     
-    def get_reverse_bridge(self, approx) -> SDE:
+    def get_reverse_bridge(self, model) -> SDE:
         f = self.f
         g = self.g
         g2 = self.g2
 
-        if approx.approximator_type == "score":
-            drift_fn = lambda t, x: jnp.dot(g2(t, x), approx(t, x))
-        elif approx.approximator_type == "gscore":
-            drift_fn = lambda t, x: jnp.dot(g(t, x), approx(t, x)) 
-        elif approx.approximator_type == "g2score":
-            drift_fn = lambda t, x: approx(t, x)
+        if model.matching_obj == "score":
+            drift_fn = lambda t, x: jnp.dot(g2(t, x), model(t, x))
+        elif model.matching_obj == "gscore":
+            drift_fn = lambda t, x: jnp.dot(g(t, x), model(t, x)) 
+        elif model.matching_obj == "g2score":
+            drift_fn = lambda t, x: model(t, x)
         else:
-            raise ValueError(f"Unknown function type: {approx.approximator_type}")
+            raise ValueError(f"Unknown model matching object: {model.matching_obj}")
 
         class ReverseSDE(SDE):
             def __init__(self):

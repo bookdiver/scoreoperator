@@ -11,6 +11,22 @@ from ..models.neuralop.uno import UNO1D
 from ..models.diffusion.diffuser import Diffuser
 from ..models.diffusion.sde import BrownianSDE, EulerianSDE, EulerianSDELandmarkIndependent
 
+def flatten_batch(x):
+    b_size, t_size, *_ = x.shape
+    return x.reshape(b_size*t_size, *x.shape[2:])
+
+def unflatten_batch(x, b_size):
+    bt_size, *_ = x.shape
+    t_size = bt_size // b_size
+    return x.reshape(b_size, t_size, *x.shape[1:])
+
+def flatten_dim(x):
+    return x.reshape(*x.shape[:-2], -1)
+
+def unflatten_dim(x):
+    return x.reshape(*x.shape[:-1], x.shape[-1]//2, 2)
+    
+
 class TrainState(train_state.TrainState):
     batch_stats: dict
 
@@ -26,12 +42,13 @@ class TrainerModule:
 
         # Diffusion
         self.diffusion_dt = config.diffusion.dt
-        self.approximator = config.diffusion.approximator
+        self.matching_obj = config.diffusion.matching_obj
 
         # Model
         self.model = UNO1D(**config.model)
 
         # Training
+        self.dir = config.training.dir
         self.seed = config.training.seed
         self.n_pts = config.training.n_pts
         self.learning_rate = config.training.learning_rate
@@ -40,6 +57,7 @@ class TrainerModule:
         self.warmup_steps = config.training.warmup_steps if hasattr(config.training, "warmup_steps") else 0
         self.train_num_epochs = config.training.train_num_epochs
         self.train_num_steps_per_epoch = config.training.train_num_steps_per_epoch
+        self.eval_num_steps_per_epoch = config.training.eval_num_steps_per_epoch if hasattr(config.training, "eval_num_steps_per_epoch") else int(0.1*self.train_num_steps_per_epoch)
 
         self.create_sde()
         self.create_diffuser_loader()
@@ -51,7 +69,7 @@ class TrainerModule:
             self.sde = BrownianSDE(**self.config.sde)
         elif self.sde_name == "eulerian":
             self.sde = EulerianSDE(**self.config.sde)
-        elif self.sde_name == "eulerian_ind":
+        elif self.sde_name == "eulerian_independent":
             self.sde = EulerianSDELandmarkIndependent(**self.config.sde)
         else:
             raise NotImplementedError(f"{self.sde_name} has not implemented!")
@@ -61,21 +79,21 @@ class TrainerModule:
             self.seed, self.sde, self.diffusion_dt
         )
 
-        if self.approximator == "score":
+        if self.matching_obj== "score":
             self.dataloader = self.diffuser.get_trajectory_generator(
                 x0=jnp.zeros(self.n_pts*2),
                 batch_size=self.batch_size,
                 noise_scaling="inv_g2",
                 weighting_output="g2s"
             )
-        elif self.approximator == "gscore":
+        elif self.matching_obj == "gscore":
             self.dataloader = self.diffuser.get_trajectory_generator(
                 x0=jnp.zeros(self.n_pts*2),
                 batch_size=self.batch_size,
                 noise_scaling="inv_g",
                 weighting_output="id"
             )
-        elif self.approximator == "g2score":
+        elif self.matching_obj == "g2score":
             self.dataloader = self.diffuser.get_trajectory_generator(
                 x0=jnp.zeros(self.n_pts*2),
                 batch_size=self.batch_size,
@@ -83,15 +101,15 @@ class TrainerModule:
                 weighting_output="id"
             )
         else:
-            raise NotImplementedError(f"{self.approximator} has not available!")
+            raise NotImplementedError(f"{self.matching_obj} has not available!")
 
     def create_functions(self):
         
         def compute_loss(params, batch_stats, batch, train):
-            xss, tss, gradss, weightingss = batch # (b_size, t_size, d_size)
-            b_size, t_size, d_size = xss.shape
-            xs = xss.reshape(b_size*t_size, d_size//2, 2)
-            ts = tss.reshape(b_size*t_size, )
+            xss, tss, gradss, weightss = batch      # (b_size, t_size, d_size)
+            xs = flatten_batch(xss)                 # (b_size*t_size, d_size)
+            xs = unflatten_dim(xs)                  # (b_size*t_size, d_size//2, 2)
+            ts = flatten_batch(tss)                 # (b_size*t_size, )
 
             outs = self.model.apply(
                 {"params": params, "batch_stats": batch_stats},
@@ -102,8 +120,8 @@ class TrainerModule:
             )
 
             preds, new_model_state = outs if train else (outs, None)
-            predss = preds.reshape(b_size, t_size, d_size)
-            loss = self.diffuser.dsm_loss(predss, gradss, weightingss)
+            predss = preds.reshape(*xss.shape)
+            loss = self.diffuser.dsm_loss(predss, gradss, weightss)
             return loss, new_model_state
     
         def train_step(state, batch):
@@ -114,28 +132,18 @@ class TrainerModule:
             return state, loss
         
         def eval_step(state, batch):
-            xss, tss, gradss, weightingss = batch # (b_size, t_size, d_size)
-            b_size, t_size, d_size = xss.shape
-            xs = xss.reshape(b_size*t_size, d_size//2, 2)
-            ts = tss.reshape(b_size*t_size, )
-            preds = state.apply_fn(
-                {"params": state.params, "batch_stats": state.batch_stats},
-                xs,
-                ts,
-                train=False,
-                mutable=False
-            )
-            predss = preds.reshape(b_size, t_size, d_size)
-            return self.diffuser.dsm_loss(predss, gradss, weightingss)
+            loss, _ = compute_loss(state.params, state.batch_stats, batch, train=False)
+            return loss
         
         self.train_step = jax.jit(train_step)
         self.eval_step = jax.jit(eval_step)
 
     def init_model(self):
         xss, tss, *_ = next(self.dataloader)
-        b_size, t_size, d_size = xss.shape
-        xs = xss.reshape(b_size*t_size, d_size//2, 2)
-        ts = tss.reshape(b_size*t_size, )
+        xs = flatten_batch(xss)
+        xs = unflatten_dim(xs)
+        ts = flatten_batch(tss)
+
         init_rng_key = jax.random.PRNGKey(self.seed)
         variables = self.model.init(init_rng_key, xs, ts, train=True)
         self.init_params = variables["params"]
@@ -183,23 +191,53 @@ class TrainerModule:
             batch = next(self.dataloader)
             self.state, loss = self.train_step(self.state, batch)
             train_losses.append(loss)
-        avg_train_loss = jnp.stack(jax.device_get(train_losses)).mean()
-        return avg_train_loss
+        train_losses = jax.device_get(train_losses)
+        avg_train_loss = jnp.stack(train_losses).mean()
+        return train_losses, avg_train_loss
+    
+    def eval_epoch(self):
+        eval_losses = []
+        for _ in range(self.eval_num_steps_per_epoch):
+            batch = next(self.dataloader)
+            eval_loss = self.eval_step(self.state, batch)
+            eval_losses.append(eval_loss)
+        eval_losses = jax.device_get(eval_losses)
+        avg_eval_loss = jnp.stack(eval_losses).mean()
+        return eval_losses, avg_eval_loss
 
-    def train_model(self, pretrained=False, load_dir=None, prefix=None):
-        if pretrained and load_dir is not None and prefix is not None:
-            self.load_model(load_dir, prefix)
+    def train_model(self, pretrained=False, step=None):
+        if pretrained:
+            if step is None:
+                self.load_model(prefix="pretrained", step=self.train_num_epochs)
+            else:
+                self.load_model(prefix="pretrained", step=step)
         else:
             self.init_optimizer()
 
+            all_train_losses = []
+            all_eval_losses = []
+
             with tqdm(range(self.train_num_epochs), desc="Training", unit="epoch") as pbar:
                 for epoch in pbar:
-                    epoch_avg_loss = self.train_epoch()
-                
-                    eval_batch = next(self.dataloader)
-                    eval_loss = self.eval_step(self.state, eval_batch)
+                    epoch_train_losses, epoch_avg_train_loss = self.train_epoch()
+                    epoch_eval_losses, epoch_avg_eval_loss = self.eval_epoch()
                     
-                    pbar.set_postfix(Epoch=epoch, train_loss=f"{epoch_avg_loss:.4f}", eval_loss=f"{eval_loss:.4f}")
+                    all_train_losses += epoch_train_losses
+                    all_eval_losses += epoch_eval_losses
+
+                    pbar.set_postfix(Epoch=epoch, train_loss=f"{epoch_avg_train_loss:.4f}", eval_loss=f"{epoch_avg_eval_loss:.4f}")
+
+            with open(self.dir + "/train_losses.txt", "w") as f:
+                for loss in all_train_losses:
+                    f.write(f"{loss}\n")
+            with open(self.dir + "/eval_losses.txt", "w") as f:
+                for loss in all_eval_losses:
+                    f.write(f"{loss}\n")
+            self.save_model("pretrained", step=self.train_num_epochs)
+            print(f"Model saved to {self.dir + '/pretrained'}")
+            print(f"Training loss saved to {self.dir + '/train_losses.txt'}")
+            print(f"Evaluation loss saved to {self.dir + '/eval_losses.txt'}")
+            print(f"Training finished!")
 
     def infer_model(self, batch):
         xs, ts = batch
@@ -212,8 +250,8 @@ class TrainerModule:
         )
         return score_outs
 
-    def save_model(self, save_dir, prefix, step=0):
-        checkpoints.save_checkpoint(ckpt_dir=save_dir,
+    def save_model(self, prefix, step=0):
+        checkpoints.save_checkpoint(ckpt_dir=self.dir,
                                     target={
                                         "params": self.state.params,
                                         "batch_stats": self.state.batch_stats
@@ -222,28 +260,29 @@ class TrainerModule:
                                     prefix=prefix,
                                     overwrite=True)
     
-    def load_model(self, load_dir, prefix):
-        ckpt = checkpoints.restore_checkpoint(ckpt_dir=load_dir, 
+    def load_model(self, prefix, step):
+        ckpt = checkpoints.restore_checkpoint(ckpt_dir=self.dir, 
                                               target=None,
+                                              step=step,
                                               prefix=prefix)
         model = UNO1D(**self.config.model)
         self.state = TrainState.create(apply_fn=model.apply,
                                        params=ckpt["params"],
                                        batch_stats=ckpt["batch_stats"],
                                        tx=self.state.tx if self.state else optax.sgd(0.1))
-        print(f"Model loaded from {load_dir}")
+        print(f"Model loaded from {self.dir}/{prefix}")
 
 
-class Approximator:
+class Model:
 
-    def __init__(self, trainer: TrainerModule, approximator_type: str):
-        self.approximator_type = approximator_type
-        self.trainer = trainer
+    def __init__(self, trainer: TrainerModule):
+        self.infer = trainer.infer_model
+        self.matching_obj = trainer.matching_obj
 
     def __call__(self, t: float, x: jnp.ndarray) -> jnp.ndarray:
         x_ = jnp.expand_dims(x.reshape(-1, 2), axis=0)
         t_ = jnp.expand_dims(jnp.asarray(t), axis=0)
-        out = self.trainer.infer_model((x_, t_))
+        out = self.infer((x_, t_))
         out = out.squeeze().flatten()
         return out
     

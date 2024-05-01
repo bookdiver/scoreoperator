@@ -25,8 +25,8 @@ class Diffuser:
         
         self.reverse_diffusion_bridge_sde = None
 
-    def get_reverse_diffusion_bridge(self, approx) -> SDE:
-        self.reverse_diffusion_bridge_sde = self.sde.get_reverse_bridge(approx)
+    def get_reverse_diffusion_bridge(self, model) -> SDE:
+        self.reverse_diffusion_bridge_sde = self.sde.get_reverse_bridge(model)
 
     def get_grads(self, xs: jnp.ndarray, ts: jnp.ndarray, dt: float, noise_scaling: str = "inv_g2") -> jnp.ndarray:
         diff_xs = xs[1:] - xs[:-1] - jax.vmap(lambda t, x: self.sde.f(t, x))(ts[:-1], xs[:-1]) * dt
@@ -72,9 +72,9 @@ class Diffuser:
         elif weighting_output == "id":
             return xs[1:], ts[1:], grads, jax.vmap(lambda x: jnp.eye(x.shape[-1]))(xs[1:])
     
-    @partial(jax.jit, static_argnums=(0, 2, 3), static_argnames=("approx",))
-    def solve_reverse_bridge_sde(self, rng_key: jax.Array, x0: jnp.ndarray, ts: jnp.ndarray, *, approx = None) -> jnp.ndarray:
-        self.get_reverse_diffusion_bridge(approx)
+    @partial(jax.jit, static_argnums=(0, 2, 3), static_argnames=("model",))
+    def solve_reverse_bridge_sde(self, rng_key: jax.Array, x0: jnp.ndarray, ts: jnp.ndarray, *, model = None) -> jnp.ndarray:
+        self.get_reverse_diffusion_bridge(model)
         if hasattr(self.sde, "noise_dim"):
             noise_dim = self.sde.noise_dim
         else:
@@ -100,14 +100,14 @@ class Diffuser:
         def generator():
             while True:
                 rng_keys = jax.random.split(self.rng_key, batch_size + 1)
-                xss, tss, gradss, weightingss = solve_sde(rng_keys[1:], x0)
+                xss, tss, gradss, weightss = solve_sde(rng_keys[1:], x0)
                 self.rng_key = rng_keys[0]
-                yield xss, tss, gradss, weightingss
+                yield xss, tss, gradss, weightss
         return generator()
     
-    def dsm_loss(self, predss: jnp.ndarray, gradss: jnp.ndarray, weightingss: jnp.ndarray = None):
+    def dsm_loss(self, predss: jnp.ndarray, gradss: jnp.ndarray, weightss: jnp.ndarray = None):
         errorss = predss + gradss
-        losses = jnp.einsum("bti,btij,btj->bt", errorss, weightingss, errorss)
+        losses = jnp.einsum("bti,btij,btj->bt", errorss, weightss, errorss)
         losses = jnp.sum(losses, axis=1)
         loss = 0.5 * self.dt * jnp.mean(losses)
         return loss
