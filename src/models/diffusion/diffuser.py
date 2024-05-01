@@ -37,7 +37,7 @@ class Diffuser:
             gs_tm1 = jax.vmap(lambda t, x: self.sde.g(t, x))(ts[:-1], xs[:-1])
             scales = jax.vmap(jnp.linalg.inv)(gs_tm1) 
         elif noise_scaling == "none":
-            scales = jax.vmap(lambda x: jnp.eye(x.shape[-1]))(xs[1:]) 
+            scales = jax.vmap(lambda x: jnp.eye(x.shape[-1]))(xs[:-1]) 
 
         grads = jax.vmap(lambda scale, diff_x: jnp.dot(scale, diff_x))(scales, diff_xs) / dt
 

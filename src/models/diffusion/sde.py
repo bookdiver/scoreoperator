@@ -37,7 +37,7 @@ class SDE(abc.ABC):
         if approx.approximator_type == "score":
             drift_fn = lambda t, x: jnp.dot(g2(t, x), approx(t, x))
         elif approx.approximator_type == "gscore":
-            drift_fn = lambda t, x: jnp.dot(g(t, x), approx(t, x))
+            drift_fn = lambda t, x: jnp.dot(g(t, x), approx(t, x)) 
         elif approx.approximator_type == "g2score":
             drift_fn = lambda t, x: approx(t, x)
         else:
