@@ -139,7 +139,10 @@ class EulerianSDELandmarkIndependent(SDE):
             in_axes=(0, None),
             out_axes=0
         )(x, self.grid)
-        return Q_half.reshape(n_pts, self.noise_dim)
+        Q_half = Q_half.reshape(n_pts, self.noise_dim)
+        Q_half = jnp.einsum("ij,kl->ikjl", Q_half, jnp.eye(2))
+        Q_half = Q_half.reshape(2*n_pts, 2*self.noise_dim)
+        return Q_half
     
     def g2(self, t: float, x: jnp.ndarray, eps: float = 1e-4) -> jnp.ndarray:
         g = self.g(t, x)

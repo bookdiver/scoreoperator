@@ -46,7 +46,7 @@ class Diffuser:
     @partial(jax.jit, static_argnums=(0, 3, 4))
     def solve_sde(self, rng_key: jax.Array, x0: jnp.ndarray, noise_scaling: str = "inv_g2", weighting_output: str = "id") -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
         if hasattr(self.sde, "noise_dim"):
-            noise_dim = self.sde.noise_dim
+            noise_dim = 2 * self.sde.noise_dim
         else:
             noise_dim = x0.shape[-1]
 
@@ -76,7 +76,7 @@ class Diffuser:
     def solve_reverse_bridge_sde(self, rng_key: jax.Array, x0: jnp.ndarray, ts: jnp.ndarray, *, model = None) -> jnp.ndarray:
         self.get_reverse_diffusion_bridge(model)
         if hasattr(self.sde, "noise_dim"):
-            noise_dim = self.sde.noise_dim
+            noise_dim = 2 * self.sde.noise_dim
         else:
             noise_dim = x0.shape[-1]
 

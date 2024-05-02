@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 
 from configs.circles_brownian import get_circles_brownian_config
 from configs.circles_eulerian import get_circles_eulerian_config
+from configs.circles_eulerian_independent import get_circles_eulerian_independent_config
 from configs.butterflies_eulerian import get_butterflies_eulerian_config
 
 from src.data.synthetic_shapes import Circle
@@ -19,13 +20,15 @@ PATH = os.path.dirname(os.path.abspath(__file__))
 parser = argparse.ArgumentParser()
 
 parser.add_argument("--experiment", type=str, default="circle", choices=["circle", "butterfly"])
-parser.add_argument("--sde", type=str, default="brownian", choices=["brownian", "eulerian"])
+parser.add_argument("--sde", type=str, default="brownian", choices=["brownian", "eulerian", "eulerian_independent"])
 parser.add_argument("--matching_obj", type=str, default="score", choices=["score", "gscore", "g2score"])
 parser.add_argument("--seed", type=int, default=42)
 parser.add_argument("--n_train_points", type=int, default=16)
-parser.add_argument("--n_test_points", type=int, default=64)
+parser.add_argument("--n_test_points", type=int, default=128)
 parser.add_argument("--n_epochs", type=int, default=100)
-parser.add_argument("--n_steps_per_epoch", type=int, default=100)
+parser.add_argument("--n_steps_per_epoch", type=int, default=200)
+
+parser.add_argument("--eval", action="store_true")
 
 args = parser.parse_args()
 
@@ -36,13 +39,15 @@ def main():
 
         if args.sde == "brownian":
             config = get_circles_brownian_config()
-            config.training.n_pts = args.n_train_points
-            config.diffusion.matching_obj = args.matching_obj
         elif args.sde == "eulerian":
             config = get_circles_eulerian_config()
             config.sde.s0 = shape1
-            config.training.n_pts = args.n_train_points
-            config.diffusion.matching_obj = args.matching_obj
+        elif args.sde == "eulerian_independent":
+            config = get_circles_eulerian_independent_config()
+            config.sde.s0 = shape1
+
+        config.training.n_pts = args.n_train_points
+        config.diffusion.matching_obj = args.matching_obj
     
     elif args.experiment == "butterfly":
         shape1 = Butterfly("example_butterfly1", interpolation=512, interpolation_type="linear")
@@ -64,7 +69,7 @@ def main():
 
     trainer = TrainerModule(config)
     print(f"Training {args.experiment} with {args.sde} SDE and {args.matching_obj} matching objective")
-    trainer.train_model()
+    trainer.train_model(pretrained=args.eval)
     model = Model(trainer)
 
     x0 = (shape2.sample(args.n_test_points) - shape1.sample(args.n_test_points)).flatten()
@@ -77,15 +82,16 @@ def main():
                       target=shape1.sample(args.n_test_points),
                       plot_target=True,
                       cmap_name="rainbow")
-    fig1.savefig(os.path.join(config.training.dir, "trajectories.png"))
+    fig1.savefig(os.path.join(config.training.dir, f"trajectories_{args.n_test_points}.png"))
     plt.close(fig1)
 
-    train_losses = np.loadtxt(os.path.join(config.training.dir, "train_losses.txt"))
-    eval_losses = np.loadtxt(os.path.join(config.training.dir, "eval_losses.txt"))
-    fig2, ax2 = plt.subplots(1, 1, figsize=(6, 4))
-    ax2.plot(train_losses, label="Train loss")
-    ax2.plot(eval_losses, label="Eval loss")
-    fig2.savefig(os.path.join(config.training.dir, "losses.png"))
+    if not args.eval:
+        train_losses = np.loadtxt(os.path.join(config.training.dir, "train_losses.txt"))
+        eval_losses = np.loadtxt(os.path.join(config.training.dir, "eval_losses.txt"))
+        fig2, ax2 = plt.subplots(1, 1, figsize=(6, 4))
+        ax2.plot(train_losses, label="Train loss")
+        ax2.plot(eval_losses, label="Eval loss")
+        fig2.savefig(os.path.join(config.training.dir, "losses.png"))
 
 if __name__ == "__main__":
     main()
