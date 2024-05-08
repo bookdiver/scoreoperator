@@ -9,6 +9,7 @@ from configs.circles_brownian import get_circles_brownian_config
 from configs.circles_eulerian import get_circles_eulerian_config
 from configs.circles_eulerian_independent import get_circles_eulerian_independent_config
 from configs.butterflies_eulerian import get_butterflies_eulerian_config
+from configs.butterflies_eulerian_independent import get_butterflies_eulerian_independent_config
 
 from src.data.synthetic_shapes import Circle
 from src.data.butterflies import Butterfly
@@ -29,6 +30,7 @@ parser.add_argument("--n_epochs", type=int, default=100)
 parser.add_argument("--n_steps_per_epoch", type=int, default=200)
 
 parser.add_argument("--eval", action="store_true")
+parser.add_argument("--show_samples", action="store_true")
 
 args = parser.parse_args()
 
@@ -45,9 +47,6 @@ def main():
         elif args.sde == "eulerian_independent":
             config = get_circles_eulerian_independent_config()
             config.sde.s0 = shape1
-
-        config.training.n_pts = args.n_train_points
-        config.diffusion.matching_obj = args.matching_obj
     
     elif args.experiment == "butterfly":
         shape1 = Butterfly("example_butterfly1", interpolation=512, interpolation_type="linear")
@@ -56,9 +55,13 @@ def main():
         if args.sde == "eulerian":
             config = get_butterflies_eulerian_config()
             config.sde.s0 = shape1
-            config.training.n_pts = args.n_train_points
-            config.diffusion.matching_obj = args.matching_obj
+        elif args.sde == "eulerian_independent":
+            config = get_butterflies_eulerian_independent_config()
+            config.sde.s0 = shape1
     
+    config.training.n_pts = args.n_train_points
+    config.diffusion.matching_obj = args.matching_obj
+
     config.training.seed = args.seed
     config.training.train_num_epochs = args.n_epochs
     config.training.train_num_steps_per_epoch = args.n_steps_per_epoch
@@ -69,6 +72,17 @@ def main():
 
     trainer = TrainerModule(config)
     print(f"Training {args.experiment} with {args.sde} SDE and {args.matching_obj} matching objective")
+
+    if args.show_samples:
+        xss, *_ = next(trainer.dataloader)
+        fig, ax = plt.subplots(1, 1, figsize=(5, 5))
+        plot_trajectories(ax, 
+                          shape1.sample(args.n_train_points)[None, ...] + xss[0].reshape(-1, args.n_train_points, 2), target=shape1.sample(args.n_train_points), 
+                          plot_target=False, 
+                          cmap_name="rainbow")
+        fig.savefig(os.path.join(config.training.dir, "samples.png"))
+        return 0
+    
     trainer.train_model(pretrained=args.eval)
     model = Model(trainer)
 
