@@ -45,8 +45,8 @@ class Diffuser:
 
     @partial(jax.jit, static_argnums=(0, 3, 4))
     def solve_sde(self, rng_key: jax.Array, x0: jnp.ndarray, noise_scaling: str = "inv_g2", weighting_output: str = "id") -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-        if hasattr(self.sde, "noise_dim"):
-            noise_dim = 2 * self.sde.noise_dim
+        if hasattr(self.sde.sde_ins, "noise_dim"):
+            noise_dim = 2 * self.sde.sde_ins.noise_dim
         else:
             noise_dim = x0.shape[-1]
 

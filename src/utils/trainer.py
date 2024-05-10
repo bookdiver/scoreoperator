@@ -1,3 +1,4 @@
+import logging
 import jax
 import jax.numpy as jnp
 from flax.training import train_state, checkpoints
@@ -23,8 +24,8 @@ def unflatten_batch(x, b_size):
 def flatten_dim(x):
     return x.reshape(*x.shape[:-2], -1)
 
-def unflatten_dim(x):
-    return x.reshape(*x.shape[:-1], x.shape[-1]//2, 2)
+def unflatten_dim(x, dim=2):
+    return x.reshape(*x.shape[:-1], x.shape[-1]//dim, dim)
     
 
 class TrainState(train_state.TrainState):
@@ -48,7 +49,7 @@ class TrainerModule:
         # Training
         self.dir = config.training.dir
         self.seed = config.training.seed
-        self.n_pts = config.training.n_pts
+        self.n_pts = config.training.n_train_pts
         self.learning_rate = config.training.learning_rate
         self.batch_size = config.training.batch_size
         self.optimizer_name = config.training.optimizer_name
@@ -68,21 +69,21 @@ class TrainerModule:
 
         if self.matching_obj== "score":
             self.dataloader = self.diffuser.get_trajectory_generator(
-                x0=jnp.zeros(self.n_pts*2),
+                x0=jnp.zeros(self.n_pts*self.sde.X0.co_dim),
                 batch_size=self.batch_size,
                 noise_scaling="inv_g2",
                 weighting_output="g2s"
             )
         elif self.matching_obj == "gscore":
             self.dataloader = self.diffuser.get_trajectory_generator(
-                x0=jnp.zeros(self.n_pts*2),
+                x0=jnp.zeros(self.n_pts*self.sde.X0.co_dim),
                 batch_size=self.batch_size,
                 noise_scaling="inv_g",
                 weighting_output="id"
             )
         elif self.matching_obj == "g2score":
             self.dataloader = self.diffuser.get_trajectory_generator(
-                x0=jnp.zeros(self.n_pts*2),
+                x0=jnp.zeros(self.n_pts*self.sde.X0.co_dim),
                 batch_size=self.batch_size,
                 noise_scaling="none",
                 weighting_output="id"
@@ -93,10 +94,11 @@ class TrainerModule:
     def create_functions(self):
         
         def compute_loss(params, batch_stats, batch, train):
-            xss, tss, gradss, weightss = batch      # (b_size, t_size, d_size)
-            xs = flatten_batch(xss)                 # (b_size*t_size, d_size)
-            xs = unflatten_dim(xs)                  # (b_size*t_size, d_size//2, 2)
-            ts = flatten_batch(tss)                 # (b_size*t_size, )
+            xss, tss, gradss, weightss = batch                                      # (b_size, t_size, d_size)
+            xs = flatten_batch(xss)                                                 # (b_size*t_size, d_size)
+            xs = unflatten_dim(xs, dim=self.sde.X0.co_dim)                  # (b_size*t_size, d_size//2, co_dim)
+            ts = flatten_batch(tss)                                                 # (b_size*t_size, )
+            logging.debug(f"xs: {xs.shape}, ts: {ts.shape}, gradss: {gradss.shape}, weightss: {weightss.shape}")
 
             outs = self.model.apply(
                 {"params": params, "batch_stats": batch_stats},
@@ -128,8 +130,9 @@ class TrainerModule:
     def init_model(self):
         xss, tss, *_ = next(self.dataloader)
         xs = flatten_batch(xss)
-        xs = unflatten_dim(xs)
+        xs = unflatten_dim(xs, dim=self.sde.X0.co_dim)
         ts = flatten_batch(tss)
+        logging.debug(f"xs: {xs.shape}, ts: {ts.shape}")
 
         init_rng_key = jax.random.PRNGKey(self.seed)
         variables = self.model.init(init_rng_key, xs, ts, train=True)
@@ -221,10 +224,10 @@ class TrainerModule:
                 for loss in all_eval_losses:
                     f.write(f"{loss}\n")
             self.save_model("pretrained", step=self.train_num_epochs)
-            print(f"Model saved to {self.dir + '/pretrained'}")
-            print(f"Training loss saved to {self.dir + '/train_losses.txt'}")
-            print(f"Evaluation loss saved to {self.dir + '/eval_losses.txt'}")
-            print(f"Training finished!")
+            logging.info(f"Model saved to {self.dir + '/pretrained'}")
+            logging.info(f"Training loss saved to {self.dir + '/train_losses.txt'}")
+            logging.info(f"Evaluation loss saved to {self.dir + '/eval_losses.txt'}")
+            logging.info(f"Training finished!")
 
     def infer_model(self, batch):
         xs, ts = batch
@@ -256,7 +259,7 @@ class TrainerModule:
                                        params=ckpt["params"],
                                        batch_stats=ckpt["batch_stats"],
                                        tx=self.state.tx if self.state else optax.sgd(0.1))
-        print(f"Model loaded from {self.dir}/{prefix}")
+        logging.info(f"Model loaded from {self.dir}/{prefix}")
 
 
 class Model:
@@ -264,9 +267,10 @@ class Model:
     def __init__(self, trainer: TrainerModule):
         self.infer = trainer.infer_model
         self.matching_obj = trainer.matching_obj
+        self.co_dim = trainer.sde.X0.co_dim
 
     def __call__(self, t: float, x: jnp.ndarray) -> jnp.ndarray:
-        x_ = jnp.expand_dims(x.reshape(-1, 2), axis=0)
+        x_ = jnp.expand_dims(x.reshape(-1, self.co_dim), axis=0)
         t_ = jnp.expand_dims(jnp.asarray(t), axis=0)
         out = self.infer((x_, t_))
         out = out.squeeze().flatten()

@@ -1,4 +1,5 @@
 import os
+import logging
 import argparse
 import jax
 import jax.numpy as jnp
@@ -16,8 +17,8 @@ PATH = os.path.dirname(os.path.abspath(__file__))
 
 parser = argparse.ArgumentParser()
 
-parser.add_argument("--experiment", type=str, default="circle", choices=["circle", "butterfly"])
-parser.add_argument("--sde", type=str, default="brownian", choices=["brownian", "eulerian", "eulerian_independent"])
+parser.add_argument("--experiment", type=str, default="circle", choices=["circle", "butterfly", "quadratic"])
+parser.add_argument("--sde", type=str, default="brownian", choices=["brownian", "eulerian", "eulerian_independent", "ou"])
 parser.add_argument("--matching_obj", type=str, default="score", choices=["score", "gscore", "g2score"])
 
 parser.add_argument("--seed", type=int, nargs="?", default=False, help="Seed for reproducibility.")
@@ -28,6 +29,7 @@ parser.add_argument("--batch_sz", type=int, nargs="?", default=False, help="Batc
 parser.add_argument("--n_epochs", type=int, nargs="?", default=False, help="Number of epochs for training.")
 parser.add_argument("--n_steps_per_epoch", type=int, nargs="?", default=False, help="Number of steps per epoch for training.")
 
+parser.add_argument("--debug", action="store_true", help="Set logging level to debug.")
 parser.add_argument("--eval", action="store_true", help="Evaluate the model and plot the trajectories.")
 parser.add_argument("--show_samples", action="store_true", help="Show samples from the training set, but do not train the model.")
 
@@ -47,10 +49,17 @@ def read_config(experiment: str, sde: str) -> ConfigDict:
         elif sde == "eulerian_independent":
             return get_butterflies_eulerian_independent_config()
     elif experiment == "quadratic":
-        if sde == "ou":
+        if sde == "brownian":
+            return get_quadratic_brownian_config()
+        elif sde == "ou":
             return get_quadratic_ou_config()
 
 def main():
+    if args.debug:
+        logging.basicConfig(level=logging.DEBUG)
+    else:
+        logging.basicConfig(level=logging.INFO)
+
     if args.experiment == "circle":
         X0 = Circle(r=1.0)
         XT = Circle(r=1.5)
@@ -60,8 +69,8 @@ def main():
         XT = Butterfly("example_butterfly2", interpolation=512, interpolation_type="linear")
 
     elif args.experiment == "quadratic":
-        X0= Quadratic(a=1.0)
-        XT = Quadratic(a=-1.0)
+        X0 = Quadratic(a=1.0, shift=0.0)
+        XT = Quadratic(a=-1.0, shift=0.0)
 
     config = read_config(args.experiment, args.sde)
     config.sde.X0 = X0
@@ -79,38 +88,42 @@ def main():
         os.mkdir(config.training.dir)
 
     trainer = TrainerModule(config)
-    print(f"Training {args.experiment} with {args.sde} SDE and {args.matching_obj} matching objective")
+    logging.info(f"Training {args.experiment} with {args.sde} SDE and {args.matching_obj} matching objective")
 
     if args.show_samples:
         xss, *_ = next(trainer.dataloader)
         fig, axes = plt.subplots(3, 3, figsize=(15, 15))
         axes = axes.flatten()
         for i in range(9):
-            xs = xss[i].reshape(-1, args.n_train_points, 2)
-            x0 = X0.sample(args.n_train_points)
+            xs = xss[i].reshape(xss.shape[1], xss.shape[2]//X0.co_dim, X0.co_dim)
+            x0 = X0.sample(config.training.n_train_pts)
+            logging.debug(f"x0: {x0.shape}")
             xs = xs + x0[None, ...]
-            plot_trajectories(axes[i], 
-                              xs, 
+            plot_trajectories(dim=X0.co_dim,
+                              ax=axes[i], 
+                              traj=xs, 
                               target=x0, 
                               plot_target=False, 
                               cmap_name="rainbow")
         fig.savefig(os.path.join(config.training.dir, "samples.png"))
+        logging.info(f"Samples saved in {config.training.dir}")
         return 0
     
     trainer.train_model(pretrained=args.eval)
     model = Model(trainer)
 
-    y0 = (XT.sample(args.n_test_points) - X0.sample(args.n_test_points)).flatten()
+    y0 = (XT.sample(config.training.n_test_pts) - X0.sample(config.training.n_test_pts)).flatten()
     ts = jnp.linspace(0.0, 1.0, 200)
     ys = trainer.diffuser.solve_reverse_bridge_sde(rng_key=jax.random.PRNGKey(args.seed), x0=y0, ts=ts, model=model)
-    ys = ys.reshape(-1, args.n_test_points, 2)
+    ys = ys.reshape(ys.shape[0], ys.shape[1]//X0.co_dim, X0.co_dim)
     fig1, ax1 = plt.subplots(1, 1, figsize=(6, 6))
-    plot_trajectories(ax1,
-                      ys + X0.sample(args.n_test_points)[None, ...],
-                      target=X0.sample(args.n_test_points),
+    plot_trajectories(dim=X0.co_dim,
+                      ax=ax1,
+                      traj=ys + X0.sample(config.training.n_test_pts)[None, ...],
+                      target=X0.sample(config.training.n_test_pts),
                       plot_target=True,
                       cmap_name="rainbow")
-    fig1.savefig(os.path.join(config.training.dir, f"trajectories_{args.n_test_points}.png"))
+    fig1.savefig(os.path.join(config.training.dir, f"trajectories_{config.training.n_test_pts}.png"))
     plt.close(fig1)
 
     if not args.eval:

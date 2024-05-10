@@ -10,7 +10,6 @@ def get_default_config() -> ml_collections.ConfigDict:
     diffusion.dt = 1e-2
 
     config.model = model = ml_collections.ConfigDict()
-    model.in_co_dim = 1
     model.out_co_dim = 1
     model.lifting_dim = 8
     model.co_dims_fmults = [1, 2, 4]

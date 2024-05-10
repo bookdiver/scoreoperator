@@ -9,7 +9,7 @@ class Function(abc.ABC):
     eps: float = 1e-2
 
     @abc.abstractmethod
-    def noise(self, rng_key: PRNGKey):
+    def noise(self, n_samples: int, rng_key: PRNGKey):
         pass
 
     @abc.abstractmethod

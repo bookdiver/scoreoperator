@@ -2,22 +2,19 @@ from typing import Union
 from .function import Function
 
 import jax.numpy as jnp
-
-class Zero(Function):
-    do_dim: int = 1
-    co_dim: int = 1
-
-    def _sample(self, n_samples: int):
-        return jnp.zeros((n_samples, self.co_dim))
+from jax.random import normal, PRNGKey
 
 class Circle(Function):
     do_dim: int = 1
     co_dim: int = 2
 
-    def __init__(self, r: Union[float, str] = 1.0, shift_x = 0.0, shift_y: float = 0.0):
-        self.r = float(r)
+    def __init__(self, r: float = 1.0, shift_x: float = 0.0, shift_y: float = 0.0):
+        self.r = r
         self.shift_x = shift_x
         self.shift_y = shift_y
+
+    def noise(self, n_samples: int, rng_key: PRNGKey):
+        return normal(rng_key, (n_samples, self.co_dim)) * self.eps
     
     def _sample(self, n_samples: int):
         t = jnp.linspace(0, 2*jnp.pi, n_samples, endpoint=False)
@@ -28,9 +25,14 @@ class Circle(Function):
 class Quadratic(Function):
     do_dim: int = 1
     co_dim: int = 1
+    eps: float = 1e-4
 
-    def __init__(self, a: Union[float, str]=1.0):
-        self.a = float(a)
+    def __init__(self, a: float = 1.0, shift: float = 0.0):
+        self.a = a
+        self.shift = shift
+
+    def noise(self, n_samples: int, rng_key: PRNGKey):
+        return normal(rng_key, (n_samples, self.co_dim)) * self.eps
 
     def _sample(self, n_samples: int):
-        return jnp.linspace(-1.0, 1.0, n_samples) ** 2 * self.a
+        return jnp.expand_dims(jnp.linspace(-1.0, 1.0, n_samples) ** 2 * self.a + self.shift, axis=-1)

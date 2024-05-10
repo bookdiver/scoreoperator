@@ -2,9 +2,13 @@ import numpy as np
 from scipy.interpolate import interp1d
 import jax.numpy as jnp
 
-from .function import Shape
+from .function import Function
 
-class Butterfly(Shape):
+class Butterfly(Function):
+    do_dim: int = 1
+    co_dim: int = 2
+    eps: float = 1e-2
+    
     def __init__(self, name: str, interpolation: int = 512, interpolation_type: str = "linear"):
         self.pts = np.load("./src/data/raw/"+f"{name}.npy")
 
@@ -15,7 +19,10 @@ class Butterfly(Shape):
             fy = interp1d(ts, self.pts[:, 1], kind=interpolation_type)
             self.pts = jnp.array([fx(interp_ts), fy(interp_ts)]).T
 
-    def sample(self, n_samples: int):
+    def noise(self, n_samples: int, rng_key):
+        return jnp.zeros((n_samples, self.co_dim))
+
+    def _sample(self, n_samples: int):
         if n_samples >= len(self.pts):
             return self.pts
         

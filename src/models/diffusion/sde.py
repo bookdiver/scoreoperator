@@ -67,6 +67,7 @@ class BrownianSDE(BaseSDE):
                  X0: Function = None):
         super().__init__()
         self.sigma = sigma
+        self.X0 = X0
 
     def f(self, t: float, x: jnp.ndarray) -> jnp.ndarray:
         return jnp.zeros_like(x)
@@ -88,6 +89,7 @@ class OUSDE(BaseSDE):
         super().__init__()
         self.sigma = sigma
         self.theta = theta
+        self.X0 = X0
     
     def f(self, t: float, x: jnp.ndarray) -> jnp.ndarray:
         return -self.theta * x
@@ -182,28 +184,31 @@ class EulerianSDELandmarkIndependent(BaseSDE):
 class SDE:
     def __init__(self, name: str, **kwargs):
         if name == "brownian":
-            self.sde = BrownianSDE(**kwargs)
+            self.sde_ins = BrownianSDE(**kwargs)
         elif name == "ou":
-            self.sde = OUSDE(**kwargs)
+            self.sde_ins = OUSDE(**kwargs)
         elif name == "eulerian":
-            self.sde = EulerianSDE(**kwargs)
-        elif name == "eulerian_landmark_independent":
-            self.sde = EulerianSDELandmarkIndependent(**kwargs)
+            self.sde_ins = EulerianSDE(**kwargs)
+        elif name == "eulerian_independent":
+            self.sde_ins = EulerianSDELandmarkIndependent(**kwargs)
         else:
             raise ValueError(f"Unknown SDE name: {name}")
-        
+    
+    def __getattr__(self, attr):
+        return getattr(self.sde_ins, attr)
+    
     def f(self, t: float, x: jnp.ndarray) -> jnp.ndarray:
-        return self.sde.f(t, x)
+        return self.sde_ins.f(t, x)
     
     def g(self, t: float, x: jnp.ndarray, **kwargs) -> jnp.ndarray:
-        return self.sde.g(t, x, **kwargs)
+        return self.sde_ins.g(t, x, **kwargs)
     
     def g2(self, t: float, x: jnp.ndarray, **kwargs) -> jnp.ndarray:
-        return self.sde.g2(t, x, **kwargs)
+        return self.sde_ins.g2(t, x, **kwargs)
     
     def inv_g2(self, t: float, x: jnp.ndarray, **kwargs) -> jnp.ndarray:
-        return self.sde.inv_g2(t, x, **kwargs)
+        return self.sde_ins.inv_g2(t, x, **kwargs)
     
-    def get_reverse_bridge(self, model) -> SDE:
-        return self.sde.get_reverse_bridge(model)
+    def get_reverse_bridge(self, model) -> BaseSDE:
+        return self.sde_ins.get_reverse_bridge(model)
     
