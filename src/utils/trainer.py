@@ -9,7 +9,7 @@ absl.logging.set_verbosity(absl.logging.ERROR)
 
 from ..models.neuralop.uno import UNO1D
 from ..models.diffusion.diffuser import Diffuser
-from ..models.diffusion.sde import BrownianSDE, EulerianSDE, EulerianSDELandmarkIndependent
+from ..models.diffusion.sde import SDE
 
 def flatten_batch(x):
     b_size, t_size, *_ = x.shape
@@ -35,10 +35,8 @@ class TrainerModule:
     def __init__(self,
                  config,
                 ):
-        self.config = config
-
         # SDE
-        self.sde_name = config.sde_name
+        self.sde = SDE(**config.sde)
 
         # Diffusion
         self.diffusion_dt = config.diffusion.dt
@@ -59,20 +57,9 @@ class TrainerModule:
         self.train_num_steps_per_epoch = config.training.train_num_steps_per_epoch
         self.eval_num_steps_per_epoch = config.training.eval_num_steps_per_epoch if hasattr(config.training, "eval_num_steps_per_epoch") else int(0.1*self.train_num_steps_per_epoch)
 
-        self.create_sde()
         self.create_diffuser_loader()
         self.create_functions()
         self.init_model()
-
-    def create_sde(self):
-        if self.sde_name == "brownian":
-            self.sde = BrownianSDE(**self.config.sde)
-        elif self.sde_name == "eulerian":
-            self.sde = EulerianSDE(**self.config.sde)
-        elif self.sde_name == "eulerian_independent":
-            self.sde = EulerianSDELandmarkIndependent(**self.config.sde)
-        else:
-            raise NotImplementedError(f"{self.sde_name} has not implemented!")
 
     def create_diffuser_loader(self):
         self.diffuser = Diffuser(
@@ -265,8 +252,7 @@ class TrainerModule:
                                               target=None,
                                               step=step,
                                               prefix=prefix)
-        model = UNO1D(**self.config.model)
-        self.state = TrainState.create(apply_fn=model.apply,
+        self.state = TrainState.create(apply_fn=self.model.apply,
                                        params=ckpt["params"],
                                        batch_stats=ckpt["batch_stats"],
                                        tx=self.state.tx if self.state else optax.sgd(0.1))

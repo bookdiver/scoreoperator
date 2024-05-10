@@ -2,7 +2,7 @@ import jax
 import functools
 
 from ..data.butterflies import Butterfly
-from ..data.synthetic_shapes import Circle
+from ..data.synthetic import Circle
 
 def cpu_run(func):
     @functools.wraps(func)

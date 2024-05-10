@@ -2,7 +2,7 @@ import numpy as np
 from scipy.interpolate import interp1d
 import jax.numpy as jnp
 
-from .shape import Shape
+from .function import Shape
 
 class Butterfly(Shape):
     def __init__(self, name: str, interpolation: int = 512, interpolation_type: str = "linear"):

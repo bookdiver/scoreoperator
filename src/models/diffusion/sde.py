@@ -6,9 +6,9 @@ from typing import Tuple
 import jax
 import jax.numpy as jnp
 
-from ...data.shape import Shape
+from ...data.function import Function
 
-class SDE(abc.ABC):
+class BaseSDE(abc.ABC):
 
     def __init__(self):
         super().__init__()
@@ -29,7 +29,7 @@ class SDE(abc.ABC):
         g2 = self.g2(t, x, **kwargs)
         return jnp.linalg.inv(g2)
     
-    def get_reverse_bridge(self, model) -> SDE:
+    def get_reverse_bridge(self, model) -> BaseSDE:
         f = self.f
         g = self.g
         g2 = self.g2
@@ -43,7 +43,7 @@ class SDE(abc.ABC):
         else:
             raise ValueError(f"Unknown model matching object: {model.matching_obj}")
 
-        class ReverseSDE(SDE):
+        class ReverseSDE(BaseSDE):
             def __init__(self):
                 super().__init__()
 
@@ -61,8 +61,10 @@ class SDE(abc.ABC):
         
         return ReverseSDE()
     
-class BrownianSDE(SDE):
-    def __init__(self, sigma: float = 1.0):
+class BrownianSDE(BaseSDE):
+    def __init__(self, 
+                 sigma: float = 1.0,
+                 X0: Function = None):
         super().__init__()
         self.sigma = sigma
 
@@ -77,13 +79,37 @@ class BrownianSDE(SDE):
 
     def inv_g2(self, t: float, x: jnp.ndarray, **kwargs) -> jnp.ndarray:
         return 1.0 / self.sigma**2 * jnp.eye(x.shape[-1])
+    
+class OUSDE(BaseSDE):
+    def __init__(self, 
+                 sigma: float = 1.0, 
+                 theta: float = 1.0, 
+                 X0: Function = None):
+        super().__init__()
+        self.sigma = sigma
+        self.theta = theta
+    
+    def f(self, t: float, x: jnp.ndarray) -> jnp.ndarray:
+        return -self.theta * x
+    
+    def g(self, t: float, x: jnp.ndarray, **kwargs) -> jnp.ndarray:
+        return self.sigma * jnp.eye(x.shape[-1])
+    
+    def g2(self, t: float, x: jnp.ndarray, **kwargs) -> jnp.ndarray:
+        return self.sigma**2 * jnp.eye(x.shape[-1])
+    
+    def inv_g2(self, t: float, x: jax.Array, **kwargs) -> jax.Array:
+        return 1.0 / self.sigma**2 * jnp.eye(x.shape[-1])
 
-class EulerianSDE(SDE):
-    def __init__(self, sigma: float = 1.0, kappa: float = 0.1, s0: Shape = None):
+class EulerianSDE(BaseSDE):
+    def __init__(self, 
+                 sigma: float = 1.0, 
+                 kappa: float = 0.1, 
+                 X0: Function = None):
         super().__init__()
         self.sigma = sigma
         self.kappa = kappa
-        self.s0 = s0
+        self.X0 = X0
     
     def f(self, t: float, x: jnp.ndarray) -> jnp.ndarray:
         return jnp.zeros_like(x)
@@ -91,7 +117,7 @@ class EulerianSDE(SDE):
     def g(self, t: float, x: jnp.ndarray, eps: float = 1e-4) -> jnp.ndarray:
         x = x.reshape(-1, 2)
         n_pts = x.shape[0]
-        x = x + self.s0.sample(n_pts)
+        x = x + self.X0.sample(n_pts)
         kernel_fn = lambda x: self.sigma * jnp.exp(-0.5 * jnp.sum(jnp.square(x), axis=-1) / self.kappa**2)
         dist = x[:, None, :] - x[None, :, :]
         kernel = kernel_fn(dist) + eps * jnp.eye(n_pts)     # Regularization to avoid singular matrix
@@ -99,12 +125,17 @@ class EulerianSDE(SDE):
         Q_half = Q_half.reshape(2*n_pts, 2*n_pts)
         return Q_half
 
-class EulerianSDELandmarkIndependent(SDE):
-    def __init__(self, sigma: float = 1.0, kappa: float = 0.1, s0: Shape = None, grid_sz: int = 50, grid_range: Tuple[float, float] = (-0.5, 1.5)):
+class EulerianSDELandmarkIndependent(BaseSDE):
+    def __init__(self, 
+                 sigma: float = 1.0, 
+                 kappa: float = 0.1, 
+                 X0: Function = None, 
+                 grid_sz: int = 50, 
+                 grid_range: Tuple[float, float] = (-0.5, 1.5)):
         super().__init__()
         self.sigma = sigma
         self.kappa = kappa
-        self.s0 = s0
+        self.X0 = X0
         self.grid_sz = grid_sz
         self.grid_range = grid_range
 
@@ -124,7 +155,7 @@ class EulerianSDELandmarkIndependent(SDE):
     def g(self, t: float, x: jnp.ndarray) -> jnp.ndarray:
         x = x.reshape(-1, 2)
         n_pts = x.shape[0]
-        x = x + self.s0.sample(n_pts)
+        x = x + self.X0.sample(n_pts)
         kernel_fn = lambda x, y: self.sigma * jnp.exp(-0.5 * jnp.linalg.norm(x-y, axis=-1)**2 / self.kappa**2)
         Q_half = jax.vmap(
         jax.vmap(
@@ -147,4 +178,32 @@ class EulerianSDELandmarkIndependent(SDE):
     def g2(self, t: float, x: jnp.ndarray, eps: float = 1e-4) -> jnp.ndarray:
         g = self.g(t, x)
         return jnp.dot(g, g.T) + eps * jnp.eye(g.shape[0])
+
+class SDE:
+    def __init__(self, name: str, **kwargs):
+        if name == "brownian":
+            self.sde = BrownianSDE(**kwargs)
+        elif name == "ou":
+            self.sde = OUSDE(**kwargs)
+        elif name == "eulerian":
+            self.sde = EulerianSDE(**kwargs)
+        elif name == "eulerian_landmark_independent":
+            self.sde = EulerianSDELandmarkIndependent(**kwargs)
+        else:
+            raise ValueError(f"Unknown SDE name: {name}")
         
+    def f(self, t: float, x: jnp.ndarray) -> jnp.ndarray:
+        return self.sde.f(t, x)
+    
+    def g(self, t: float, x: jnp.ndarray, **kwargs) -> jnp.ndarray:
+        return self.sde.g(t, x, **kwargs)
+    
+    def g2(self, t: float, x: jnp.ndarray, **kwargs) -> jnp.ndarray:
+        return self.sde.g2(t, x, **kwargs)
+    
+    def inv_g2(self, t: float, x: jnp.ndarray, **kwargs) -> jnp.ndarray:
+        return self.sde.inv_g2(t, x, **kwargs)
+    
+    def get_reverse_bridge(self, model) -> SDE:
+        return self.sde.get_reverse_bridge(model)
+    

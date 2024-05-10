@@ -10,21 +10,24 @@ def close_2d_curve(pts: jnp.ndarray):
     return jnp.concatenate([pts, pts[:1]], axis=0)
 
 @cpu_run
-def plot_shape_with_pts(ax, pts, color, marker='o', label=''):
+def plot_shape_with_pts(ax, pts, color, marker='o', label='', closed=True):
     """Plot a shape with sampled points."""
-    ax.plot(*close_2d_curve(pts).T, color=color, label=label)
+    if closed:
+        ax.plot(*close_2d_curve(pts).T, color=color, label=label)
+    else:
+        ax.plot(*pts.T, color=color, label=label)
     ax.scatter(*pts.T, color=color, marker=marker)
     return ax
 
 @cpu_run
-def plot_trajectories(ax, traj, target, cmap_name="viridis", plot_target=True):
+def plot_trajectories(ax, traj, target, cmap_name="viridis", plot_target=True, closed=True):
     cmap = colormaps.get_cmap(cmap_name)
     colors = cmap(jnp.linspace(0., 1., traj.shape[0]))
     starting, ending = traj[0], traj[-1]
-    plot_shape_with_pts(ax, starting, color=colors[0], marker='o', label='Start')
-    plot_shape_with_pts(ax, ending, color=colors[-1], marker='o', label='End')
+    plot_shape_with_pts(ax, starting, color=colors[0], marker='o', label='Start', closed=closed)
+    plot_shape_with_pts(ax, ending, color=colors[-1], marker='o', label='End', closed=closed)
     if plot_target:
-        plot_shape_with_pts(ax, target, color="g", marker='x', label='Target')
+        plot_shape_with_pts(ax, target, color="g", marker='x', label='Target', closed=closed)
 
     for i in range(traj.shape[1]):
         x = traj[:, i, 0] 
@@ -37,6 +40,8 @@ def plot_trajectories(ax, traj, target, cmap_name="viridis", plot_target=True):
         lc.set_array(jnp.linspace(0., 1., traj.shape[0])),
         lc.set_linewidth(0.7),
         line = (ax.add_collection(lc),)
+
+    plt.legend()
     plt.xlabel("$x$")
     plt.ylabel("$y$")
 
