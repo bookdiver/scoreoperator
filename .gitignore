@@ -169,4 +169,4 @@ wandb
 settings.json
 pretrained
 results
-
+*.h5

@@ -30,6 +30,21 @@ def test_SpectralConv1D():
     assert out.shape == (4, 32, out_co_dim)
     assert out.dtype == jnp.float32
 
+def test_SpectralConv2D():
+    in_co_dim = 1
+    out_co_dim = 2
+    n_modes = 16
+    rng_key = jax.random.PRNGKey(42)
+    spectral_conv = SpectralConv2D(
+        in_co_dim,
+        out_co_dim,
+        n_modes,
+    )
+    x = jnp.ones((4, 32, 32, in_co_dim))
+    out, params = spectral_conv.init_with_output({"params": rng_key}, x)
+    assert out.shape == (4, 32, 32, out_co_dim)
+    assert out.dtype == jnp.float32
+    
 def test_TimeModulatedSpectralConv1D():
     in_co_dim = 2
     out_co_dim = 2
