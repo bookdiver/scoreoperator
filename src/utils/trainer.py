@@ -8,7 +8,7 @@ import absl
 
 absl.logging.set_verbosity(absl.logging.ERROR)
 
-from ..models.neuralop.uno import UNO1D
+from ..models.neuralop.uno import CTUNO1D
 from ..models.diffusion.diffuser import Diffuser
 from ..models.diffusion.sde import SDE
 
@@ -44,7 +44,7 @@ class TrainerModule:
         self.matching_obj = config.diffusion.matching_obj
 
         # Model
-        self.model = UNO1D(**config.model)
+        self.model = CTUNO1D(**config.model)
 
         # Training
         self.dir = config.training.dir
