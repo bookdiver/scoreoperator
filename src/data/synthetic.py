@@ -8,10 +8,11 @@ class Circle(Function):
     do_dim: int = 1
     co_dim: int = 2
 
-    def __init__(self, r: float = 1.0, shift_x: float = 0.0, shift_y: float = 0.0):
+    def __init__(self, r: float = 1.0, shift_x: float = 0.0, shift_y: float = 0.0, eps: float = 1e-2):
         self.r = r
         self.shift_x = shift_x
         self.shift_y = shift_y
+        self.eps = eps
 
     def noise(self, n_samples: int, rng_key: PRNGKey):
         return normal(rng_key, (n_samples, self.co_dim)) * self.eps
@@ -25,11 +26,11 @@ class Circle(Function):
 class Quadratic(Function):
     do_dim: int = 1
     co_dim: int = 1
-    eps: float = 1e-4
 
-    def __init__(self, a: float = 1.0, shift: float = 0.0):
+    def __init__(self, a: float = 1.0, shift: float = 0.0, eps: float = 1e-4):
         self.a = a
         self.shift = shift
+        self.eps = eps
 
     def noise(self, n_samples: int, rng_key: PRNGKey):
         return normal(rng_key, (n_samples, self.co_dim)) * self.eps

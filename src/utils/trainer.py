@@ -9,7 +9,7 @@ import absl
 absl.logging.set_verbosity(absl.logging.ERROR)
 
 from ..models.neuralop.uno import CTUNO1D
-from ..models.diffusion.diffuser import Diffuser
+from ..models.diffusion.diffuser import Diffuser1D
 from ..models.diffusion.sde import SDE
 
 def flatten_batch(x):
@@ -26,8 +26,8 @@ def flatten_dim(x):
 
 def unflatten_dim(x, dim=2):
     return x.reshape(*x.shape[:-1], x.shape[-1]//dim, dim)
-    
 
+    
 class TrainState(train_state.TrainState):
     batch_stats: dict
 
@@ -49,7 +49,9 @@ class TrainerModule:
         # Training
         self.dir = config.training.dir
         self.seed = config.training.seed
+
         self.n_pts = config.training.n_train_pts
+
         self.learning_rate = config.training.learning_rate
         self.batch_size = config.training.batch_size
         self.optimizer_name = config.training.optimizer_name
@@ -63,13 +65,13 @@ class TrainerModule:
         self.init_model()
 
     def create_diffuser_loader(self):
-        self.diffuser = Diffuser(
+        self.diffuser = Diffuser1D(
             self.seed, self.sde, self.diffusion_dt
         )
 
         if self.matching_obj== "score":
             self.dataloader = self.diffuser.get_trajectory_generator(
-                x0=jnp.zeros(self.n_pts*self.sde.X0.co_dim),
+                x0=jnp.zeros(self.n_pts*self.sde.X0.co_dim),        # Since we are modelling the displacement, it should always starts from 0
                 batch_size=self.batch_size,
                 noise_scaling="inv_g2",
                 weighting_output="g2s"
@@ -94,11 +96,10 @@ class TrainerModule:
     def create_functions(self):
         
         def compute_loss(params, batch_stats, batch, train):
-            xss, tss, gradss, weightss = batch                                      # (b_size, t_size, d_size)
-            xs = flatten_batch(xss)                                                 # (b_size*t_size, d_size)
-            xs = unflatten_dim(xs, dim=self.sde.X0.co_dim)                  # (b_size*t_size, d_size//2, co_dim)
-            ts = flatten_batch(tss)                                                 # (b_size*t_size, )
-            logging.debug(f"xs: {xs.shape}, ts: {ts.shape}, gradss: {gradss.shape}, weightss: {weightss.shape}")
+            xss, tss, gradss, *weightss = batch
+            xs = flatten_batch(xss)     
+            xs = unflatten_dim(xs, dim=self.sde.X0.co_dim)      # (b_size*t_size, n, co_dim)
+            ts = flatten_batch(tss)                                              
 
             outs = self.model.apply(
                 {"params": params, "batch_stats": batch_stats},
@@ -110,7 +111,7 @@ class TrainerModule:
 
             preds, new_model_state = outs if train else (outs, None)
             predss = preds.reshape(*xss.shape)
-            loss = self.diffuser.dsm_loss(predss, gradss, weightss)
+            loss = self.diffuser.dsm_loss(predss, gradss, *weightss)
             return loss, new_model_state
     
         def train_step(state, batch):
@@ -132,7 +133,6 @@ class TrainerModule:
         xs = flatten_batch(xss)
         xs = unflatten_dim(xs, dim=self.sde.X0.co_dim)
         ts = flatten_batch(tss)
-        logging.debug(f"xs: {xs.shape}, ts: {ts.shape}")
 
         init_rng_key = jax.random.PRNGKey(self.seed)
         variables = self.model.init(init_rng_key, xs, ts, train=True)
@@ -263,14 +263,15 @@ class TrainerModule:
 
 
 class Model:
-
-    def __init__(self, trainer: TrainerModule):
+    """ This model serves as the wrapper for the trained nn to fit in the reverse bridge solver """
+    def __init__(self, trainer: TrainerModule, dim: int = 1):
         self.infer = trainer.infer_model
         self.matching_obj = trainer.matching_obj
+        self.dim = dim
         self.co_dim = trainer.sde.X0.co_dim
 
     def __call__(self, t: float, x: jnp.ndarray) -> jnp.ndarray:
-        x_ = jnp.expand_dims(x.reshape(-1, self.co_dim), axis=0)
+        x_ = jnp.expand_dims(x.reshape(-1, self.co_dim), axis=0)    # (n*co_dim, ) -> (1, n, co_dim)
         t_ = jnp.expand_dims(jnp.asarray(t), axis=0)
         out = self.infer((x_, t_))
         out = out.squeeze().flatten()

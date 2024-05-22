@@ -180,7 +180,29 @@ class EulerianSDELandmarkIndependent(BaseSDE):
     def g2(self, t: float, x: jnp.ndarray, eps: float = 1e-4) -> jnp.ndarray:
         g = self.g(t, x)
         return jnp.dot(g, g.T) + eps * jnp.eye(g.shape[0])
+    
+class StochasticHeatEquation(BaseSDE):
+    def __init__(self,
+                 sigma: float,
+                 kappa: float,
+                 dx: float):
+        self.sigma = sigma
+        self.kappa = kappa
+        self.dx = dx
 
+    def f(self, t: float, x: jnp.ndarray) -> jnp.ndarray:
+        return self.kappa * (jnp.roll(x, 1, axis=0) + jnp.roll(x, -1, axis=0) + 
+                             jnp.roll(x, 1, axis=1) + jnp.roll(x, -1, axis=1) - 4 * x) / self.dx**2     # Finite difference for Laplacian
+
+    def g(self, t: float, x: jnp.ndarray) -> jnp.ndarray:
+        return self.sigma
+    
+    def g2(self, t: float, x: jnp.ndarray) -> jnp.ndarray:
+        return self.sigma**2
+    
+    def inv_g2(self, t: float, x: jnp.ndarray) -> jnp.ndarray:
+        return 1 / self.sigma**2
+    
 class SDE:
     def __init__(self, name: str, **kwargs):
         if name == "brownian":
@@ -191,6 +213,8 @@ class SDE:
             self.sde_ins = EulerianSDE(**kwargs)
         elif name == "eulerian_independent":
             self.sde_ins = EulerianSDELandmarkIndependent(**kwargs)
+        elif name == "stochastic_heat":
+            self.sde_ins = StochasticHeatEquation(**kwargs)
         else:
             raise ValueError(f"Unknown SDE name: {name}")
     

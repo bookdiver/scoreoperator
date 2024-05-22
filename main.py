@@ -18,6 +18,8 @@ PATH = os.path.dirname(os.path.abspath(__file__))
 parser = argparse.ArgumentParser()
 
 parser.add_argument("--experiment", type=str, default="circle", choices=["circle", "butterfly", "quadratic"])
+parser.add_argument("--target", type=str, default="parnassius_honrathi")
+parser.add_argument("--start", type=str, default="papilio_polytes")
 parser.add_argument("--sde", type=str, default="brownian", choices=["brownian", "eulerian", "eulerian_independent", "ou"])
 parser.add_argument("--matching_obj", type=str, default="score", choices=["score", "gscore", "g2score"])
 
@@ -53,6 +55,8 @@ def read_config(experiment: str, sde: str) -> ConfigDict:
             return get_quadratic_brownian_config()
         elif sde == "ou":
             return get_quadratic_ou_config()
+    elif experiment == "heat":
+        return get_stochastic_heat_config()
 
 def main():
     if args.debug:
@@ -65,8 +69,8 @@ def main():
         XT = Circle(r=1.5)
     
     elif args.experiment == "butterfly":
-        X0 = Butterfly("example_butterfly1", interpolation=512, interpolation_type="linear")
-        XT = Butterfly("example_butterfly2", interpolation=512, interpolation_type="linear")
+        X0 = Butterfly(args.start, interp=300, interp_method="linear")
+        XT = Butterfly(args.target, interp=300, interp_method="linear")
 
     elif args.experiment == "quadratic":
         X0 = Quadratic(a=1.0, shift=0.0)
@@ -82,7 +86,7 @@ def main():
     config.training.n_test_pts = args.n_test_pts if args.n_test_pts else config.training.n_test_pts
     config.training.train_num_epochs = args.n_epochs if args.n_epochs else config.training.train_num_epochs
     config.training.train_num_steps_per_epoch = args.n_steps_per_epoch if args.n_steps_per_epoch else config.training.train_num_steps_per_epoch
-    config.training.dir = os.path.join(PATH, "results", f"{args.experiment}_{args.sde}_{args.matching_obj}")
+    config.training.dir = os.path.join(PATH, "results", f"{args.experiment}_{args.sde}_{args.matching_obj}_{args.start}")
 
     if not os.path.exists(config.training.dir):
         os.mkdir(config.training.dir)
@@ -103,7 +107,6 @@ def main():
                               ax=axes[i], 
                               traj=xs, 
                               target=x0, 
-                              plot_target=False, 
                               cmap_name="rainbow")
         fig.savefig(os.path.join(config.training.dir, "samples.png"))
         logging.info(f"Samples saved in {config.training.dir}")
@@ -121,7 +124,6 @@ def main():
                       ax=ax1,
                       traj=ys + X0.sample(config.training.n_test_pts)[None, ...],
                       target=X0.sample(config.training.n_test_pts),
-                      plot_target=True,
                       cmap_name="rainbow")
     fig1.savefig(os.path.join(config.training.dir, f"trajectories_{config.training.n_test_pts}.png"))
     plt.close(fig1)

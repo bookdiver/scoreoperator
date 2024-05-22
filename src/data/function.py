@@ -20,6 +20,6 @@ class Function(abc.ABC):
         if rng_key is None:
             return self._sample(n_samples)
         else:
-            noise = self.noise(rng_key)
+            noise = self.noise(n_samples, rng_key)
             return self._sample(n_samples) + noise
     

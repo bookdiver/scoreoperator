@@ -1,8 +1,19 @@
 import jax
 import functools
+from contextlib import contextmanager
 
 from ..data.butterflies import Butterfly
 from ..data.synthetic import Circle
+
+@contextmanager
+def use_cpu_backend():
+    original_backend = jax.config.read("jax_platform_name")
+    jax.config.update("jax_platform_name", "cpu")
+
+    try:
+        yield
+    finally:
+        jax.config.update("jax_platform_name", original_backend)
 
 def cpu_run(func):
     @functools.wraps(func)

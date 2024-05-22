@@ -170,3 +170,7 @@ settings.json
 pretrained
 results
 *.h5
+assets
+*.npy
+docs
+raw

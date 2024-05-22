@@ -1,44 +1,30 @@
 import jax.numpy as jnp
-from ..models.diffusion.sde import BrownianSDE
+import jax.random as random
 
-def test_brownian_sde():
-    dim = 2
-    sigma = 1.0
-    sde = BrownianSDE(dim, sigma)
+from diffrax import (UnsafeBrownianPath, DirectAdjoint, 
+                     MultiTerm, ODETerm, 
+                     ControlTerm, Euler, SaveAt, diffeqsolve)
 
-    t = 0.0
-    x = jnp.array([1.0, 2.0])
+from ..models.diffusion.sde import *
 
-    # Test f function
-    f_result = sde.f(t, x)
-    assert jnp.all(f_result == jnp.zeros_like(x))
+def test_heat_sde():
+    sde = SDE(
+        name = "stochastic_heat",
+        sigma = 0.1,
+        kappa = 0.2,
+        dx = 0.01
+    )
+    key = random.PRNGKey(0)
+    x0 = random.normal(key, (64, 64))
 
-    # Test g function
-    g_result = sde.g(t, x)
-    expected_g_result = sigma * jnp.eye(dim)
-    assert jnp.all(g_result == expected_g_result)
+    brownian = UnsafeBrownianPath(shape=(64, 64), key=key)
+    terms = MultiTerm(
+        ODETerm(lambda t, y, _: sde.f(t, y)),
+        ControlTerm(lambda t, y, _: sde.g(t, y), brownian)
+    )
+    solver = Euler()
+    saveat = SaveAt(ts=jnp.arange(0.0, 4.0, 1e-2))
+    sol = diffeqsolve(terms, solver, t0=0.0, t1=4.0, dt0=1e-2, saveat=saveat, y0=x0, adjoint=DirectAdjoint())
 
-    # Test covariance function
-    covariance_result = sde.covariance(t, x)
-    expected_covariance_result = sigma**2 * jnp.eye(dim)
-    assert jnp.all(covariance_result == expected_covariance_result)
-
-    # Test inv_covariance function
-    inv_covariance_result = sde.inv_covariance(t, x)
-    expected_inv_covariance_result = 1.0 / sigma**2 * jnp.eye(dim)
-    assert jnp.all(inv_covariance_result == expected_inv_covariance_result)
-
-    # Test get_reverse_bridge function
-    def score_fn(t: float, x: jnp.ndarray):
-        return x / (1. - t)
-    reverse_sde = sde.get_reverse_bridge(score_fn)
-
-    # Test f function of reverse_sde
-    reverse_f_result = reverse_sde.f(t, x)
-    expected_reverse_f_result = sde.covariance(t, x) @ score_fn(t, x)
-    assert jnp.all(reverse_f_result == expected_reverse_f_result)
-
-    # Test g function of reverse_sde
-    reverse_g_result = reverse_sde.g(t, x)
-    expected_reverse_g_result = sde.g(t, x)
-    assert jnp.all(reverse_g_result == expected_reverse_g_result)
+    xs = sol.ys
+    assert xs.shape == (401, 64, 64)

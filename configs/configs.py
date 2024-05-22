@@ -6,7 +6,7 @@ def get_circles_brownian_config():
     config.sde.name = "brownian"
     config.sde.sigma = 0.1
 
-    config.diffusion.matching_obj = "score"
+    config.diffusion.matching_obj = "g2score"
     config.diffusion.dt = 2e-2
 
     config.model.out_co_dim = 2
@@ -80,8 +80,8 @@ def get_circles_eulerian_independent_config():
     config.training.learning_rate = 1e-3
     config.training.batch_size = 16
     config.training.optimizer_name = "adam"
-    config.training.warmup_steps = 1000
-    config.training.train_num_epochs = 100
+    config.training.warmup_steps = 500
+    config.training.train_num_epochs = 50
     config.training.train_num_steps_per_epoch = 100
     return config
 
@@ -138,9 +138,9 @@ def get_butterflies_eulerian_independent_config():
     config.training.learning_rate = 1e-3
     config.training.batch_size = 16
     config.training.optimizer_name = "adam"
-    config.training.warmup_steps = 2000
-    config.training.train_num_epochs = 100
-    config.training.train_num_steps_per_epoch = 200
+    config.training.warmup_steps = 500
+    config.training.train_num_epochs = 50
+    config.training.train_num_steps_per_epoch = 100
     return config
 
 def get_quadratic_brownian_config():
@@ -149,9 +149,10 @@ def get_quadratic_brownian_config():
     config.sde.name = "brownian"
     config.sde.sigma = 0.1
 
-    config.diffusion.matching_obj = "score"
+    config.diffusion.matching_obj = "g2score"
     config.diffusion.dt = 2e-2
 
+    config.model.name = "uno"
     config.model.out_co_dim = 1
     config.model.lifting_dim = 16
     config.model.co_dims_fmults = [1, 2, 4]
@@ -195,5 +196,30 @@ def get_quadratic_ou_config():
     config.training.optimizer_name = "adam"
     config.training.warmup_steps = 500
     config.training.train_num_epochs = 100
-    config.training.train_num_steps_per_epoch = 50
+    config.training.train_num_steps_per_epoch = 100
     return config
+
+
+def get_stochastic_heat_config():
+    config = get_default_config()
+
+    config.sde.name = "stochastic_heat"
+    config.sde.sigma = 0.1
+    config.sde.kappa = 1.0
+    config.sde.dx = 0.2
+
+    config.diffusion_matching_obj = "g2score"
+    config.diffusion.dt = 1e-1
+
+    config.training.seed = 42
+    config.training.n_train_pts = 8
+    config.training.n_test_pts = 128
+    config.training.learning_rate = 1e-3
+    config.training.batch_size = 8
+    config.training.optimizer_name = "adam"
+    config.training.warmup_steps = 500
+    config.training.train_num_epochs = 100
+    config.training.train_num_steps_per_epoch = 10
+    return config
+
+
