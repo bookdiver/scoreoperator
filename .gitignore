@@ -174,3 +174,7 @@ assets
 *.npy
 docs
 raw
+images
+images_wback
+neurips_paper_figures
+plots/ckpts
