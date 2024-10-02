@@ -162,7 +162,7 @@ cython_debug/
 # Latex compiled files
 *.bbl
 *.synctex.gz
-
+.DS_Store
 
 plot_results
 wandb
@@ -172,5 +172,9 @@ results
 *.h5
 assets
 *.npy
-docs
+# docs
 raw
+*.jpg
+*.png
+*.pdf
+plots/ckpts

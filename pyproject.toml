@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bridgeop"
+version = "0.1.0"
+description = "A package for bridge operations"
+authors = [{name = "Your Name", email = "your.email@example.com"}]
+readme = "README.md"
+requires-python = ">=3.7"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "jax",
+    "jaxlib",
+    "matplotlib",
+    "jupyter",
+    "flax",
+    "optax",
+    "tqdm"
+    # Add any other dependencies your project needs
+]
+
+[project.urls]
+"Homepage" = "https://github.com/yourusername/bridgeop"
+"Bug Tracker" = "https://github.com/yourusername/bridgeop/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"*" = ["*.txt", "*.rst"]

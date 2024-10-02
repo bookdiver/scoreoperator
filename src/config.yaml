@@ -1,0 +1,195 @@
+circles_brownian:
+  diffusion_bridge:
+    sde_name: brownian
+    sde_kwargs:
+      T: 1.0
+      sigma: 0.1
+    dt: 1.0e-2
+  neural_op:
+    in_co_dim: 2
+    out_co_dim: 2
+    lifting_dim: 16
+    co_dims_fmults: [1, 2, 4]
+    n_modes_per_layer: [8, 6, 4]
+    act: gelu
+    norm: batch
+  training:
+    dir: ./pretrained/circles_brownian/
+    seed: 42
+    n_train_pts: 16
+    lr: 2.0e-4
+    batch_sz: 16
+    opt_name: adam
+    warmup_steps: 500
+    train_n_iters: 10000
+    checkpoint_freq: 1000
+
+circles_lagrangian:
+  diffusion_bridge:
+    sde_name: lagrangian
+    sde_kwargs:
+      T: 1.0
+      sigma: 0.1
+      kappa: 0.2
+    dt: 1.0e-2
+  neural_op:
+    in_co_dim: 2
+    out_co_dim: 2
+    lifting_dim: 16
+    co_dims_fmults: [1, 2, 4, 4]
+    n_modes_per_layer: [8, 6, 4, 4]
+    act: gelu
+    norm: batch
+  training:
+    dir: ./pretrained/circles_lagrangian/
+    seed: 42
+    n_train_pts: 16
+    lr: 2.0e-4
+    batch_sz: 16
+    opt_name: adam
+    warmup_steps: 500
+    train_n_iters: 10000
+    checkpoint_freq: 1000
+
+circles_eulerian:
+  diffusion_bridge:
+    sde_name: eulerian
+    sde_kwargs:
+      T: 1.0
+      sigma: 0.2
+      kappa: 0.1
+      W_shape: (32, 32)
+      W_range: ((-2.0, 2.0), (-2.0, 2.0))
+    dt: 1.0e-2
+  neural_op:
+    in_co_dim: 2
+    out_co_dim: 2
+    lifting_dim: 16
+    co_dims_fmults: [1, 2, 4, 4]
+    n_modes_per_layer: [8, 6, 4, 4]
+    act: gelu
+    norm: batch
+  training:
+    dir: ./pretrained/circles_eulerian/
+    seed: 42
+    n_train_pts: 16
+    lr: 2.0e-4
+    batch_sz: 16
+    opt_name: adam
+    warmup_steps: 500
+    train_n_iters: 10000
+    checkpoint_freq: 1000
+
+# sphere_brownian:
+# TODO: to be finished
+
+# butterflies_brownian:
+# TODO: to be finished
+
+butterflies_lagrangian:
+  diffusion_bridge:
+    sde_name: lagrangian
+    sde_kwargs:
+      T: 1.0
+      sigma: 0.03
+      kappa: 0.08
+    dt: 1.0e-2
+  neural_op:
+    in_co_dim: 2
+    out_co_dim: 2
+    lifting_dim: 16
+    co_dims_fmults: [1, 2, 4, 4]
+    n_modes_per_layer: [16, 8, 6, 6]
+    act: gelu
+    norm: batch
+  training:
+    dir: ./pretrained/butterflies_lagrangian/
+    seed: 42
+    n_train_pts: 32
+    lr: 2.0e-4
+    batch_sz: 16
+    opt_name: adam
+    warmup_steps: 1000
+    train_n_iters: 20000
+    checkpoint_freq: 2000
+
+butterflies_eulerian:
+  diffusion_bridge:
+    sde_name: eulerian
+    sde_kwargs:
+      T: 1.0
+      sigma: 0.04
+      kappa: 0.02
+      W_shape: (64, 64)
+      W_range: ((-0.5, 1.5), (-0.5, 1.5))
+    dt: 1.0e-2
+  neural_op:
+    in_co_dim: 2
+    out_co_dim: 2
+    lifting_dim: 16
+    co_dims_fmults: [1, 2, 4, 4]
+    n_modes_per_layer: [16, 8, 6, 6]
+    act: gelu
+    norm: batch
+  training:
+    dir: ./pretrained/butterflies_eulerian
+    seed: 42
+    n_train_pts: 32
+    lr: 2.0e-4
+    batch_sz: 16
+    opt_name: adam
+    warmup_steps: 1000
+    train_n_iters: 20000
+    checkpoint_freq: 2000
+
+# quadratic_brownian:
+#   sde:
+#     name: brownian
+#     sigma: 0.1
+#   diffusion:
+#     matching_obj: g2score
+#     dt: 2.0e-2
+#   model:
+#     name: uno
+#     out_co_dim: 1
+#     lifting_dim: 16
+#     co_dims_fmults: [1, 2, 4]
+#     n_modes_per_layer: [6, 4, 2]
+#     act: gelu
+#     norm: batch
+#   training:
+#     seed: 42
+#     n_train_pts: 8
+#     n_test_pts: 128
+#     learning_rate: 1.0e-3
+#     batch_size: 16
+#     optimizer_name: adam
+#     warmup_steps: 500
+#     train_num_epochs: 100
+#     train_num_steps_per_epoch: 100
+
+# quadratic_ou:
+#   sde:
+#     name: ou
+#     sigma: 0.5
+#     theta: 0.1
+#   diffusion:
+#     matching_obj: score
+#     dt: 2.0e-2
+#   model:
+#     out_co_dim: 1
+#     lifting_dim: 16
+#     co_dims_fmults: [1, 2, 4]
+#     n_modes_per_layer: [6, 4, 2]
+#     act: gelu
+#     norm: batch
+#   training:
+#     seed: 42
+#     n_train_pts: 8
+#     n_test_pts: 128
+#     learning_rate: 1.0e-3
+#     batch_size: 16
+#     optimizer_name: adam
+#     warmup_steps: 500
+#     train_num_epochs: 100
+#     train_num_steps_per_epoch: 100

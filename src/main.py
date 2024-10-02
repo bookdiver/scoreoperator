@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 from ml_collections import ConfigDict
 from configs.configs import *
 from src.data.synthetic import Circle, Quadratic
-from src.data.butterflies import Butterfly
+from src.data.butterfly import Butterfly
 from src.utils.trainer import TrainerModule, Model
 from src.utils.plotting import plot_trajectories
 
