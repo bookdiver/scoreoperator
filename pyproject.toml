@@ -15,15 +15,16 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "jax",
-    "jaxlib",
     "matplotlib",
     "jupyter",
     "flax",
     "optax",
-    "tqdm"
     # Add any other dependencies your project needs
 ]
+
+[project.optional-dependencies]
+cpu = ["jax[cpu]"]
+gpu = ["jax[cuda12]"]
 
 [project.urls]
 "Homepage" = "https://github.com/yourusername/bridgeop"

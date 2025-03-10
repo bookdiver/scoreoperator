@@ -59,19 +59,22 @@ class DiffusionBridge:
             out_axes=0
         )(xs, ts)
 
-        return xs[:, 1:], ts[1:], bs
+        return xs[:, 1:], ts[1:], bs        # X(t_{n}), t_{n}, b(X(t_{n}), X(t_{n-1}))
     
     # @partial(jax.jit, static_argnums=(0, 2, 3), static_argnames=("model",))
-    def solve_reverse_bridge(self, rng_key: jax.Array, xT: jnp.ndarray, n_batches: int,model = None) -> SamplePath:
+    def solve_reverse_bridge(self, rng_key: jax.Array, xT: jnp.ndarray, n_batches: int,model = None, return_drift: bool = False) -> SamplePath:
         
         reverse_bridge = self.sde.get_reverse_bridge(model)
         reverse_bridge_solver = EulerMaruyama(reverse_bridge, self.wiener)
-        sol = reverse_bridge_solver.solve(rng_key, x0=xT, n_batches=n_batches)
+        sol = reverse_bridge_solver.solve(rng_key, x0=xT, n_batches=n_batches, return_drift=return_drift)
 
         return sol
     
     def dsm_loss(self, outputs: jnp.ndarray, bs: jnp.ndarray):
-        loss = jnp.sum(jnp.linalg.norm(outputs - bs, axis=-1)**2, axis=1) * self.dt
+        b, t, *_, d = outputs.shape
+        loss = (outputs - bs).reshape(b, t, -1, d)
+        loss = jnp.mean(jnp.linalg.norm(loss, axis=-1)**2, axis=-1) 
+        loss = jnp.sum(loss, axis=1) * self.dt
         loss = 0.5 * jnp.mean(loss, axis=0)
         return loss
     

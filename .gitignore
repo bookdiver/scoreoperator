@@ -178,3 +178,4 @@ raw
 *.png
 *.pdf
 plots/ckpts
+ckpts

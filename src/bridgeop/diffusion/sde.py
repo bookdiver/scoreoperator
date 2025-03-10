@@ -188,13 +188,14 @@ class EulerianSDE(BaseSDE):
     def __init__(self, 
                  sigma: float = 1.0, 
                  kappa: float = 0.1, 
-                 W_shape: Tuple[int, ...] = (50, 50), 
-                 W_range: Tuple[Tuple[float, float], ...] = ((-0.5, 1.5), (-0.5, 1.5)),
+                 W_shape: Tuple[int, ...] = (50, 50, 2), 
+                 W_range: Tuple[Tuple[float, float], ...] = ((-2.0, 2.0), (-2.0, 2.0)),
                  **kwargs):
         super().__init__(**kwargs)
         self.sigma = sigma
         self.kappa = kappa
-        assert len(W_shape) == len(W_range), "W_shape and W_range must have the same length"
+        assert len(W_range) == W_shape[-1]
+        assert len(W_shape) - 1 == W_shape[-1]
         self.W_shape = W_shape
         self.W_range = W_range
     
@@ -202,10 +203,10 @@ class EulerianSDE(BaseSDE):
     def _W_grid(self):
         """ Noise grid.
         """
-        grids = [jnp.linspace(start, end, num) for (start, end), num in zip(self.W_range, self.W_shape)]
+        grids = [jnp.linspace(start, end, num) for (start, end), num in zip(self.W_range, self.W_shape[:-1])]
         meshgrid = jnp.meshgrid(*grids, indexing='xy')
         grid = jnp.stack(meshgrid, axis=-1)
-        return grid.reshape(-1, len(self.W_shape))
+        return grid.reshape(-1, len(self.W_shape)-1)
     
     def f(self, t: float, x: jnp.ndarray) -> jnp.ndarray:
         return jnp.zeros_like(x)

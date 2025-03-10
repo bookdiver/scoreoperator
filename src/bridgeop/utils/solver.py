@@ -123,7 +123,7 @@ class SDESolver(abc.ABC):
         self._dts = jnp.diff(self._ts)
         
     @abc.abstractmethod
-    def _solve_step(self, x: jnp.ndarray, t: jnp.ndarray, dt: float, dW: jnp.ndarray, *args, **kwargs) -> jnp.ndarray:
+    def _solve_step(self, x: jnp.ndarray, t: jnp.ndarray, dt: float, dW: jnp.ndarray, return_drift: bool = False, *args, **kwargs) -> jnp.ndarray:
         pass
 
     @partial(jax.jit, static_argnums=(0, 3))
@@ -135,12 +135,13 @@ class SDESolver(abc.ABC):
         *args, 
         **kwargs
     ) -> SamplePath:
+        init_shape = x0.shape
         
         def scan_fn(carry: Tuple[jnp.ndarray, ...], val: Tuple[jnp.ndarray, float, jnp.ndarray], *args, **kwargs) -> Tuple[Tuple[jnp.ndarray, ...], jnp.ndarray]:
             x, *_ = carry
             t, dt, dW = val
-            x_next = self._solve_step(x, t, dt, dW, *args, **kwargs)
-            return (x_next,), x_next
+            x_next, drift = self._solve_step(x, t, dt, dW, *args, **kwargs)
+            return (x_next,), (x_next, drift)
         
         dWs = self.wiener.sample_path(
             rng_key,
@@ -148,7 +149,7 @@ class SDESolver(abc.ABC):
             n_batches=n_batches
         ).xs
         
-        _, xs = jax.vmap(
+        (x_final, ), (xs, drifts) = jax.vmap(
             lambda dW: jax.lax.scan(
                 scan_fn,
                 init=(x0.flatten(),),
@@ -156,13 +157,18 @@ class SDESolver(abc.ABC):
             ),
             in_axes=0
         )(dWs)
+        # Concatenate x0 in front of xs
+        x0_expanded = x0.ravel()[None, None, :].repeat(n_batches, axis=0)  # Shape: (n_batches, 1, n_pts * n_dim)
+        xs = jnp.concatenate([x0_expanded, xs], axis=1)  # Shape: (n_batches, n_steps+1, n_pts * n_dim)
+        xs = xs.reshape((n_batches, len(self._ts), *init_shape))
         
-        return SamplePath(xs=xs, ts=self._ts[1:])
+        return SamplePath(xs=xs, ts=self._ts, fs=drifts)
     
 class EulerMaruyama(SDESolver):
     
-    def _solve_step(self, x: jnp.ndarray, t: jnp.ndarray, dt: float, dW: jnp.ndarray, *args, **kwargs) -> jnp.ndarray:
-        x_next = x + self.sde.f(t, x, *args, **kwargs) * dt + self.sde.g(t, x, *args, **kwargs) @ dW
-        return x_next
+    def _solve_step(self, x: jnp.ndarray, t: jnp.ndarray, dt: float, dW: jnp.ndarray, *args, **kwargs) -> Tuple[jnp.ndarray, jnp.ndarray]:
+        drift = self.sde.f(t, x, *args, **kwargs) 
+        x_next = x + drift * dt + self.sde.g(t, x, *args, **kwargs) @ dW
+        return x_next, drift
     
     

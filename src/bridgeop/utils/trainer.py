@@ -1,13 +1,12 @@
 from functools import partial
 import time
-import logging
 
 import jax
 import jax.numpy as jnp
-from typing import Callable
 from flax import struct
 from flax.training import train_state, checkpoints
 import optax
+from tqdm import tqdm
 
 from ..neuralop.uno import CTUNO
 from ..diffusion.bridge import DiffusionBridge
@@ -26,14 +25,6 @@ def flatten_dim(x):
 
 def unflatten_dim(x, dim=2):
     return x.reshape(*x.shape[:-1], x.shape[-1]//dim, dim)
-
-
-# @struct.dataclass
-# class TrainState(train_state.TrainState):
-#     batch_stats: dict
-#     apply_fn: Callable
-#     tx: optax.GradientTransformation
-#     opt_state: optax.OptState
 
 @struct.dataclass
 class TrainState(train_state.TrainState):
@@ -58,10 +49,11 @@ class TrainerModule:
     def __init__(self,
                  config,
                 ):
+        
         # Diffusion bridge 
         self.db = DiffusionBridge(**config["diffusion_bridge"])
         self.neural_op = CTUNO(**config["neural_op"])
-
+        
         # Training
         training_config = config["training"]
         self.dir = training_config["dir"]
@@ -112,7 +104,7 @@ class TrainerModule:
         self.train_step = jax.jit(train_step)
 
     def _init_model(self):
-        dummy_xs = jnp.zeros((1, 1, self.n_train_pts, self.neural_op.in_co_dim))
+        dummy_xs = jnp.zeros((1, 1, *self.n_train_pts, self.neural_op.in_co_dim))
         dummy_ts = jnp.zeros((1, 1, ))
         dummy_xs_flatten = flatten_batch(dummy_xs)
         dummy_ts_flatten = flatten_batch(dummy_ts)
@@ -122,6 +114,10 @@ class TrainerModule:
             t=dummy_ts_flatten, 
             train=True
         )
+        
+        # Print the number of trainable parameters
+        num_params = sum(param.size for param in jax.tree_util.tree_leaves(variables["params"]))
+        print(f"Number of trainable parameters: {num_params:,}")
         
         self.init_params = variables["params"]
         self.init_batch_stats = variables["batch_stats"] if "batch_stats" in variables else {}
@@ -164,7 +160,7 @@ class TrainerModule:
     
 
     def train_model(self, x0, mode='train', step=None):
-        assert x0.shape == (self.n_train_pts, self.neural_op.in_co_dim)
+        # assert x0.shape == (*self.n_train_pts, self.neural_op.in_co_dim)
 
         if mode == 'train':
             self._init_optimizer()
@@ -177,7 +173,7 @@ class TrainerModule:
         elif mode == 'pretrained':
             if step is None:
                 step = self.train_n_iters
-            self.load_model(prefix="pretrained", step=step)
+            self.load_model(prefix="checkpoint_", step=step)
             return  # No training needed for pretrained mode
         else:
             raise ValueError("Invalid mode. Choose 'train', 'resume', or 'pretrained'.")
@@ -187,7 +183,7 @@ class TrainerModule:
         all_train_times = []
 
         stage_start_time = time.time()
-        for i in range(start_iter, self.train_n_iters):
+        for i in tqdm(range(start_iter, self.train_n_iters)):
             iter_start_time = time.time()
             self.rng_key, step_key = jax.random.split(self.rng_key)
             batch = self.db.solve_forward_sde(
@@ -266,7 +262,8 @@ class TrainerModule:
             params=ckpt["params"],
             tx=self.state.tx,
             batch_stats=ckpt["batch_stats"],
-            opt_state=ckpt["optimizer_state"]
+            opt_state=ckpt["optimizer_state"],
+            step=step
         )
         self.rng_key = ckpt["rng_key"]
         print(f"Model loaded from {self.dir}/{prefix}_step_{step}")
@@ -277,8 +274,9 @@ class TrainerModule:
 class ScoreModel:
     """ This model serves as the wrapper for the trained nn to fit in the reverse bridge solver 
     """
-    def __init__(self, trainer: TrainerModule):
+    def __init__(self, x0: jnp.ndarray, trainer: TrainerModule):
         self.infer = jax.jit(trainer.infer_model)
+        self.init_shape = x0.shape
         # self.infer = trainer.infer_model
 
     @partial(jax.jit, static_argnums=(0,))
@@ -292,6 +290,7 @@ class ScoreModel:
         Returns:
             jnp.ndarray: model output, shape (n*do_dim, )
         """
+        x = x.reshape(self.init_shape)
         x_expanded = jnp.expand_dims(x, axis=0)
         t_expanded = jnp.full((1,), t)
         
@@ -301,6 +300,7 @@ class ScoreModel:
     # @partial(jax.jit, static_argnums=(0,))
     def batch_call(self, t: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
         """ Batched model inference
+        # NOTE: Not sure if this works
 
         Args:
             t (jnp.ndarray): time steps, shape (batch_size,)
