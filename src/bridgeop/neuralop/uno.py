@@ -1,90 +1,162 @@
+import jax.numpy as jnp
 from flax import linen as nn
-from typing import Tuple, Union
 
-from .blocks import *
+from bridgeop.neuralop.blocks import (
+    Block1D, Block2D, TimeEmbedding
+)
 
-class CTUNO(nn.Module):
-    """ U-Net shaped time-dependent neural operator"""
-    do_dim: int
-    in_co_dim: int
-    out_co_dim: int
-    lifting_dim: int
-    co_dims_fmults: Tuple[int, ...]
-    grid_scaling_fmults: Tuple[float, ...]
-    n_modes_per_layer: Tuple[Tuple[int, ...],...]
-    norm: str = "instance"
-    act: str  = "relu"
-    use_freq_mod: bool = True
+class CTUNO1D(nn.Module):
+    """ 
+    Continuous-time U-shaped Fourier neural operator that maps
+    [0, T] x L^2(R, R^{d_u}) to L^2(R, R^{d_v}).
+    """
+    d_u: int                        # input channel dimensions
+    d_v: int                        # output channel dimensions
+    c: int                          # time embedding dimensions
+    d_ls: tuple[int]                # intermediate channel dimensions 
+    modes_ls: tuple[int]            # intermediate number of low frequencies
 
     @nn.compact
-    def __call__(self, x: jnp.ndarray, t: jnp.ndarray, train: bool = False) -> jnp.ndarray:
-        assert len(self.co_dims_fmults) == len(self.n_modes_per_layer) == len(self.grid_scaling_fmults)
-        t_emb_dim = 4 * self.lifting_dim
-        co_dims_fmults = (1,) + self.co_dims_fmults
-
-        t_emb = TimeEmbedding(
-            t_emb_dim,
-        )(t)
-
-        x = nn.Dense(
-            self.lifting_dim,
-        )(x)
-
-
-        downs = []
-        for idx_layer in range(len(self.co_dims_fmults)):
-            in_co_dim_fmult = co_dims_fmults[idx_layer]
-            out_co_dim_fmult = co_dims_fmults[idx_layer+1]
-            n_modes = self.n_modes_per_layer[idx_layer]
-            x = CTUNOBlock(
-                do_dim=self.do_dim,
-                in_co_dim=int(self.lifting_dim * in_co_dim_fmult),
-                out_co_dim=int(self.lifting_dim * out_co_dim_fmult),
-                t_emb_dim=t_emb_dim,
-                n_modes=n_modes,
-                out_grid_scaling=self.grid_scaling_fmults[idx_layer],
-                norm=self.norm,
-                act=self.act,
-                use_freq_mod=self.use_freq_mod
-            )(x, t_emb, train)
-            downs.append(x)
-
-        x = CTUNOBlock(
-            do_dim=self.do_dim,
-            in_co_dim=self.lifting_dim * self.co_dims_fmults[-1],
-            out_co_dim=self.lifting_dim * self.co_dims_fmults[-1],
-            t_emb_dim=t_emb_dim,
-            n_modes=self.n_modes_per_layer[-1],
-            out_grid_scaling=1.0,
-            norm=self.norm,
-            act=self.act,
-            use_freq_mod=self.use_freq_mod
-        )(x, t_emb, train)
-
-        for idx_layer in range(len(self.co_dims_fmults)-1, 0, -1):
-            in_co_dim_fmult = co_dims_fmults[idx_layer+1]
-            out_co_dim_fmult = co_dims_fmults[idx_layer] 
-            n_modes = self.n_modes_per_layer[idx_layer]
-            down = downs[idx_layer]
-            x = jnp.concatenate([x, down], axis=-1)
-            x = CTUNOBlock(
-                do_dim=self.do_dim,
-                in_co_dim=int(self.lifting_dim * in_co_dim_fmult * 2),
-                out_co_dim=int(self.lifting_dim * out_co_dim_fmult),
-                t_emb_dim=t_emb_dim,
-                n_modes=n_modes,
-                out_grid_scaling=1.0 / self.grid_scaling_fmults[idx_layer],
-                norm=self.norm,
-                act=self.act,
-                use_freq_mod=self.use_freq_mod
-            )(x, t_emb, train)
+    def __call__(self, x, t, train = False):
+        """
+        x:          (b, L, d_u)
+        t:          (b, )
         
-        x = nn.Dense(
-            self.out_co_dim,
-        )(x)
+        Returns:    (b, L, d_v)
+        """
+        assert len(self.d_ls) == len(self.modes_ls) + 1
+        phi_t = TimeEmbedding(self.c)(t)
+        psi_t = TimeEmbedding(self.c)(t)
+        
+        downs = []
+        
+        # lifting
+        d_lifting = self.d_ls[0]
+        x = nn.Dense(d_lifting, 
+                     kernel_init=nn.initializers.normal(0.01),
+                    )(x)
+        
+        # down path
+        for i in range(len(self.modes_ls)):
+            x = Block1D(
+                modes=self.modes_ls[i],
+                d_u=self.d_ls[i],
+                d_v=self.d_ls[i+1],
+                c=self.c,
+                name=f"DownLayer{i}"
+            )(x, phi_t, psi_t, train)
+            downs.append(x)
+        
+        # bottleneck
+        x = Block1D(
+            modes=self.modes_ls[-1],
+            d_u=self.d_ls[-1],
+            d_v=self.d_ls[-1],
+            c=self.c,
+            name="BottleNeckLayer"
+        )(x, phi_t, psi_t, train)
+        
+        # up path
+        for i in reversed(range(len(self.modes_ls))):
+            x_down = downs.pop()
+            x = jnp.concatenate([x, x_down], axis=-1)
+            x = Block1D(
+                modes=self.modes_ls[i],
+                d_u=self.d_ls[i+1] * 2,
+                d_v=self.d_ls[i],
+                c=self.c,
+                name=f"UpLayer{i}"
+            )(x, phi_t, psi_t, train)
+            
+        # projection
+        x = nn.Dense(self.d_v, 
+                     kernel_init=nn.initializers.normal(0.01),
+                    )(x)
+        
+        return x
 
+class CTUNO2D(nn.Module):
+    """ 
+    Continuous-time U-shaped Fourier neural operator that maps
+    [0, T] x L^2(R^2, R^{d_u}) to L^2(R^2, R^{d_v}).
+    """
+    d_u: int                        # input channel dimensions
+    d_v: int                        # output channel dimensions
+    c: int                          # time embedding dimensions
+    d_ls: tuple[int]                # intermediate channel dimensions 
+    modes_ls: tuple[int]            # intermediate number of low frequencies
+
+    @nn.compact
+    def __call__(self, x, t, train = False):
+        """
+        x:          (b, H, W, d_u)
+        t:          (b, )
+        
+        Returns:    (b, H, W, d_v)
+        """
+        assert len(self.d_ls) == len(self.modes_ls) + 1
+        phi_t = TimeEmbedding(self.c)(t)
+        psi_t = TimeEmbedding(self.c)(t)
+        
+        downs = []
+        
+        # lifting
+        d_lifting = self.d_ls[0]
+        x = nn.Dense(d_lifting, 
+                     kernel_init=nn.initializers.normal(0.01),
+                    )(x)
+        
+        # down path
+        for i in range(len(self.modes_ls)):
+            x = Block2D(
+                modes=self.modes_ls[i],
+                d_u=self.d_ls[i],
+                d_v=self.d_ls[i+1],
+                c=self.c,
+                name=f"DownLayer{i}"
+            )(x, phi_t, psi_t, train)
+            downs.append(x)
+        
+        # bottleneck
+        x = Block2D(
+            modes=self.modes_ls[-1],
+            d_u=self.d_ls[-1],
+            d_v=self.d_ls[-1],
+            c=self.c,
+            name="BottleNeckLayer"
+        )(x, phi_t, psi_t, train)
+        
+        # up path
+        for i in reversed(range(len(self.modes_ls))):
+            x_down = downs.pop()
+            x = jnp.concatenate([x, x_down], axis=-1)
+            x = Block2D(
+                modes=self.modes_ls[i],
+                d_u=self.d_ls[i+1] * 2,
+                d_v=self.d_ls[i],
+                c=self.c,
+                name=f"UpLayer{i}"
+            )(x, phi_t, psi_t, train)
+            
+        # projection
+        x = nn.Dense(self.d_v, 
+                     kernel_init=nn.initializers.normal(0.01),
+                    )(x)
         return x
         
-
+class ModelFactory:
+    
+    @staticmethod
+    def create(model_type, model_config):
+        model_classes = {
+            "CTUNO1D": CTUNO1D,
+            "CTUNO2D": CTUNO2D
+        }
+        
+        if model_type not in model_classes:
+            raise ValueError(f"Unknown model type: {model_type}")
+        
+        model_class = model_classes[model_type]
+        return model_class(**model_config)
 
 

@@ -164,19 +164,7 @@ cython_debug/
 *.synctex.gz
 .DS_Store
 
-plot_results
-wandb
 settings.json
-pretrained
-results
-*.h5
-assets
-*.npy
+
 # docs
-raw
-*.jpg
-*.png
-*.pdf
-plots/ckpts
 ckpts
-/docs

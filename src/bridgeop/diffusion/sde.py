@@ -1,62 +1,54 @@
-from __future__ import annotations
 import abc
-from typing import Tuple, Dict, Any
+from functools import partial
 
 import jax
 import jax.numpy as jnp
-
-# from ...data.function import FunctionData
-# from .model import Model
+import jax.scipy as jsp
 
 class BaseSDE(abc.ABC):
-    W_shape: Tuple[int, ...]
     T: float
+    dt: float
+    n_steps: int
+    ts: jnp.ndarray
+    dts: jnp.ndarray
+    x_shape: tuple[int]
+    bm_shape: tuple[int]
 
-    def __init__(self, T: float = 1.0, **kwargs):
+    def __init__(self, config):
         super().__init__()
-        self.T = T
-        self.W_shape = kwargs.get("W_shape", None)
+        self.T = config['T']
+        self.dt = config['dt']
+        self.x_shape = config['x_shape']
+        self.bm_shape = config['bm_shape']
+        
+    @property
+    def ts(self):
+        return jnp.arange(0.0, self.T + self.dt, self.dt)
+    
+    @property
+    def n_steps(self):
+        return len(self.ts) - 1
+    
+    @property
+    def dts(self):
+        return jnp.diff(self.ts)
         
     @abc.abstractmethod
-    def f(self, t: float, x: jnp.ndarray) -> jnp.ndarray:
-        """ Drift term of the SDE.
-
-        Args:
-            t (float): time step
-            x (jnp.ndarray): flatten function evaluation x, shape (n_pts*co_dim, )
-
-        Returns:
-            jnp.ndarray: drift term, shape (n_pts*co_dim, )
-        """
+    def f(self, t, x):
         pass
 
     @abc.abstractmethod
-    def g(self, t: float, x: jnp.ndarray) -> jnp.ndarray:
-        """ Diffusion term of the SDE.
-
-        Args:
-            t (float): time step
-            x (jnp.ndarray): flatten function evaluation x, shape (n_pts*co_dim, )
-
-        Returns:
-            jnp.ndarray: diffusion term, shape (n_pts*co_dim, noise_dim)
+    def g(self, t, x):
+        pass
+    
+    @abc.abstractmethod
+    def apply_g(self, Phi, dW):
+        """ Apply the Hilbert-Schmidt operator Phi=g(X(t)) on the Wiener process dW
         """
         pass
 
-    def a(self, t: float, x: jnp.ndarray) -> jnp.ndarray:
-        """ Covariance term of the SDE.
-
-        Args:
-            t (float): time step
-            x (jnp.ndarray): flatten function evaluation x, shape (n_pts*co_dim, )
-
-        Returns:
-            jnp.ndarray: covariance term, shape (n_pts*co_dim, n_pts*co_dim)
-        """
-        g = self.g(t, x)
-        return jnp.dot(g, g.T)
-    
-    def get_reverse_bridge(self, model) -> BaseSDE:
+    @staticmethod
+    def get_reverse_bridge(forward_sde, score):
         """ Get the reverse bridge SDE from the additional drift model.
 
         Args:
@@ -68,203 +60,149 @@ class BaseSDE(abc.ABC):
         Returns:
             BaseSDE: reverse bridge SDE class
         """
-        T = self.T
-        W_shape = self.W_shape
+        reversed_sde_config = {
+            'T': forward_sde.T,
+            'dt': forward_sde.dt,
+            'x_shape': forward_sde.x_shape,
+            'bm_shape': forward_sde.bm_shape
+        }
         
-        f = self.f
-        g = self.g
-        a = self.a
-
-        drift_fn = lambda t, x: model(t, x)
-
+        forward_f = forward_sde.f
+        forward_g = forward_sde.g
+        forward_apply_g = forward_sde.apply_g
+        
         class ReverseSDE(BaseSDE):
             def __init__(self):
-                super().__init__(T=T, **({"W_shape": W_shape} if W_shape is not None else {}))
+                super().__init__(reversed_sde_config)
 
-            def f(self, t: float, x: jnp.ndarray) -> jnp.ndarray:
-                reversed_t = self.T - t
-                # return -f(t=reversed_t, x=x) + drift_fn(t=reversed_t, x=x) + self.jac_a(t=reversed_t, x=x)
-                return -f(t=reversed_t, x=x) + drift_fn(t=reversed_t, x=x)
+            def f(self, t, y):
+                tau = self.T - t
+                return -forward_f(tau, y) + score(tau, y)
             
-            def g(self, t: float, x: jnp.ndarray) -> jnp.ndarray:
-                reversed_t = self.T - t
-                return g(t=reversed_t, x=x)
+            def g(self, t, y):
+                tau = self.T - t
+                return forward_g(tau, y)
             
-            def a(self, t: float, x: jnp.ndarray) -> jnp.ndarray:
-                reversed_t = self.T - t
-                return a(t=reversed_t, x=x)
-            
-            def jac_a(self, t: float, x: jnp.ndarray) -> jnp.ndarray:
-                reversed_t = self.T - t
-                jacobian_ = jax.jacfwd(a, argnums=1)(reversed_t, x)
-                return jnp.trace(jacobian_)
+            def apply_g(self, Phi, dW):
+                return forward_apply_g(Phi, dW)
         
         return ReverseSDE()
     
 class BrownianSDE(BaseSDE):
     """ Brownian motion SDE: dX(t) = sigma * dW(t)
     """
-    def __init__(self,
-                 sigma: float = 1.0,
-                 **kwargs):
-        super().__init__(**kwargs)
-        self.sigma = sigma
+    sigma: float
+    
+    def __init__(self, config):
+        super().__init__(config)
+        self.sigma = config["sigma"]
 
-    def f(self, t: float, x: jnp.ndarray) -> jnp.ndarray:
+    def f(self, t, x):
         return jnp.zeros_like(x)
     
-    def g(self, t: float, x: jnp.ndarray, **kwargs) -> jnp.ndarray:
-        return self.sigma * jnp.eye(x.shape[-1])
+    def g(self, t, x):
+        return None
     
-    def a(self, t: float, x: jnp.ndarray, **kwargs) -> jnp.ndarray:
-        return self.sigma**2 * jnp.eye(x.shape[-1])
+    def apply_g(self, Phi, dW):
+        return self.sigma * dW
 
-    def inv_a(self, t: float, x: jnp.ndarray, **kwargs) -> jnp.ndarray:
-        return 1.0 / self.sigma**2 * jnp.eye(x.shape[-1])
     
-class OUSDE(BaseSDE):
-    """ Ornstein-Uhlenbeck SDE: dX(t) = -theta * X(t) dt + sigma * dW(t)
-    """
-    def __init__(self, 
-                 sigma: float = 1.0, 
-                 theta: float = 1.0,
-                 **kwargs):
-        super().__init__(**kwargs)
-        self.sigma = sigma
-        self.theta = theta
-    
-    def f(self, t: float, x: jnp.ndarray) -> jnp.ndarray:
-        return -self.theta * x
-    
-    def g(self, t: float, x: jnp.ndarray, **kwargs) -> jnp.ndarray:
-        return self.sigma * jnp.eye(x.shape[-1])
-    
-    def a(self, t: float, x: jnp.ndarray, **kwargs) -> jnp.ndarray:
-        return self.sigma**2 * jnp.eye(x.shape[-1])
-    
-    def inv_a(self, t: float, x: jax.Array, **kwargs) -> jnp.ndarray:
-        return 1.0 / self.sigma**2 * jnp.eye(x.shape[-1])
 
-class LagrangianSDE(BaseSDE):
-    """ Lagrangian SDE: dX(t) = Q^{1/2}(X(t)) dW(t) with noise fields assigned to each landmark, 
-        see ``Stochastic flows and shape bridges, S. Sommer et al.'' for details.
-    """
-    def __init__(self, 
-                 sigma: float = 1.0, 
-                 kappa: float = 0.1,
-                 **kwargs):
-        super().__init__(**kwargs)
-        self.sigma = sigma
-        self.kappa = kappa
+# class LagrangianSDE(BaseSDE):
+#     """ Lagrangian SDE: dX(t) = Q^{1/2}(X(t)) dW(t) with noise fields assigned to each landmark, 
+#         see ``Stochastic flows and shape bridges, S. Sommer et al.'' for details.
+#     """
+#     def __init__(self, 
+#                  sigma: float = 1.0, 
+#                  kappa: float = 0.1,
+#                  **kwargs):
+#         super().__init__(**kwargs)
+#         self.sigma = sigma
+#         self.kappa = kappa
     
-    def f(self, t: float, x: jnp.ndarray) -> jnp.ndarray:
-        return jnp.zeros_like(x)
+#     def f(self, t: float, x: jnp.ndarray) -> jnp.ndarray:
+#         return jnp.zeros_like(x)
     
-    def g(self, t: float, x: jnp.ndarray, eps: float = 1e-6) -> jnp.ndarray:
-        """ Diffusion term of the Lagrangian SDE defined by the Gaussian kernel k(x, y) = sigma * exp(-||x-y||^2 / kappa^2).
-            The covariance is computed between the landmarks.
+#     def g(self, t: float, x: jnp.ndarray, eps: float = 1e-6) -> jnp.ndarray:
+#         """ Diffusion term of the Lagrangian SDE defined by the Gaussian kernel k(x, y) = sigma * exp(-||x-y||^2 / kappa^2).
+#             The covariance is computed between the landmarks.
 
-        Args:
-            t (float): time step.
-            x (jnp.ndarray): flatten function evaluation x, shape (n_pts*co_dim, ).
-            eps (float, optional): regularization to avoid singularity of the diffusion term. Defaults to 1e-4.
+#         Args:
+#             t (float): time step.
+#             x (jnp.ndarray): flatten function evaluation x, shape (n_pts*co_dim, ).
+#             eps (float, optional): regularization to avoid singularity of the diffusion term. Defaults to 1e-4.
 
-        Returns:
-            jnp.ndarray: diffusion term, shape (n_pts*co_dim, n_pts*co_dim).
-        """
-        x = x.reshape(-1, 2)
-        n_pts = x.shape[0]
-        kernel_fn = lambda x: self.sigma * jnp.exp(-jnp.linalg.norm(x, axis=-1)**2 / self.kappa**2)
-        dist = x[:, None, :] - x[None, :, :]
-        kernel = kernel_fn(dist) + eps * jnp.eye(n_pts)     # Regularization to avoid singularity
-        Q_half = jnp.einsum("ij,kl->ikjl", kernel, jnp.eye(2))
-        Q_half = Q_half.reshape(2*n_pts, 2*n_pts)
-        return Q_half
+#         Returns:
+#             jnp.ndarray: diffusion term, shape (n_pts*co_dim, n_pts*co_dim).
+#         """
+#         x = x.reshape(-1, 2)
+#         n_pts = x.shape[0]
+#         kernel_fn = lambda x: self.sigma * jnp.exp(-jnp.linalg.norm(x, axis=-1)**2 / self.kappa**2)
+#         dist = x[:, None, :] - x[None, :, :]
+#         kernel = kernel_fn(dist) + eps * jnp.eye(n_pts)     # Regularization to avoid singularity
+#         Q_half = jnp.einsum("ij,kl->ikjl", kernel, jnp.eye(2))
+#         Q_half = Q_half.reshape(2*n_pts, 2*n_pts)
+#         return Q_half
 
 class EulerianSDE(BaseSDE):
-    """ Eulerian SDE: dX(t) = Q^{1/2}(X(t)) dW(t) with noise fields acting on the whole domain, 
-        see ``Stochastic flows and shape bridges, S. Sommer et al.'' for details.
+    """ 
+    Eulerian SDE: dX(t) = Q^{1/2}(X(t)) dW(t) with noise fields acting on the whole domain, 
+    see ``Stochastic flows and shape bridges, S. Sommer et al.'' for details.
     """
-    def __init__(self, 
-                 sigma: float = 1.0, 
-                 kappa: float = 0.1, 
-                 W_shape: Tuple[int, ...] = (50, 50, 2), 
-                 W_range: Tuple[Tuple[float, float], ...] = ((-2.0, 2.0), (-2.0, 2.0)),
-                 **kwargs):
-        super().__init__(**kwargs)
-        self.sigma = sigma
-        self.kappa = kappa
-        assert len(W_range) == W_shape[-1]
-        assert len(W_shape) - 1 == W_shape[-1]
-        self.W_shape = W_shape
-        self.W_range = W_range
+    k_alpha: float
+    k_sigma: float
     
-    @property
-    def _W_grid(self):
-        """ Noise grid.
-        """
-        grids = [jnp.linspace(start, end, num) for (start, end), num in zip(self.W_range, self.W_shape[:-1])]
-        meshgrid = jnp.meshgrid(*grids, indexing='xy')
-        grid = jnp.stack(meshgrid, axis=-1)
-        return grid.reshape(-1, len(self.W_shape)-1)
+    def __init__(self, config):
+        super().__init__(config)
+        self.k_alpha = config["k_alpha"]
+        self.k_sigma = config["k_sigma"]
     
-    def f(self, t: float, x: jnp.ndarray) -> jnp.ndarray:
+    def f(self, t, x):
         return jnp.zeros_like(x)
     
-    def g(self, t: float, x: jnp.ndarray) -> jnp.ndarray:
-        """ Diffusion term of the Eulerian SDE defined by the Gaussian kernel k(x, y) = sigma * exp(-||x-y||^2 / kappa^2).
-            The covariance is computed between the landmarks and the grid points.
+    def g(self, t, x):
+        return x # NOTE: it is not formally true, as we will use x to compute Phi dW
 
-        Args:
-            t (float): time step.
-            x (jnp.ndarray): flatten function evaluation x, shape (n_pts*co_dim, ).
-            eps (float, optional): regularization to avoid singularity of the diffusion term. Defaults to 1e-4.
+    def apply_g(self, Phi, dW):
+        coords_to_pixels = lambda x: 24 * x + jnp.array([32, 32])[jnp.newaxis, :]
+        
+        window_size = 17
+        window_span = (-2.5, 2.5)
+        delta_x = (window_span[1] - window_span[0]) / (window_size - 1)
+        window_xs = jnp.linspace(*window_span, window_size)
+        window_amp = self.k_alpha * delta_x
+        window_scale = self.k_sigma / delta_x
+        
+        def convolution_window(span, amp, scale):
+            return amp * jnp.sqrt(2.0 * jnp.pi) \
+                * jsp.stats.norm.pdf(span, 0, scale) \
+                    * jsp.stats.norm.pdf(span[:, None], 0, scale)
+                    
+        window = convolution_window(window_xs, window_amp, window_scale)
+        dW_convolved = jax.vmap(
+            partial(jsp.signal.convolve, mode="same"),
+            in_axes=(2, None),
+            out_axes=2
+        )(dW, window)
+        
+        x_pixels = coords_to_pixels(Phi)  # shape (N, 2)
+        x_coords = x_pixels.T  # shape (2, N)
 
-        Returns:
-            jnp.ndarray: diffusion term, shape (n_pts*co_dim, noise_dim*co_dim).
-        """
-        x = x.reshape(-1, 2)
-        n_pts = x.shape[0]
-        kernel_fn = lambda x, y: self.sigma * jnp.exp(-0.5 * jnp.linalg.norm(x-y, axis=-1)**2 / self.kappa**2)
-        Q_half = jax.vmap(
-            jax.vmap(
-                kernel_fn,
-                in_axes=(None, 0),
-                out_axes=0      # evaluate for all points of W_grid
-            ),
-            in_axes=(0, None),
-            out_axes=0          # evaluate for all points of x
-        )(x, self._W_grid)
-        Q_half = jnp.einsum("ij,kl->ikjl", Q_half, jnp.eye(2))
-        Q_half = Q_half.reshape(2*n_pts, 2*self._W_grid.shape[0])
-        return Q_half
-    
-    def a(self, t: float, x: jnp.ndarray, eps: float = 1e-6) -> jnp.ndarray:
-        g = self.g(t, x)
-        return jnp.dot(g, g.T) + eps * jnp.eye(g.shape[0])
+        def interp_channel(channel):  # channel: shape (H, W)
+            return jsp.ndimage.map_coordinates(channel, x_coords, order=1, mode="nearest")
+
+        Phi_dW = jax.vmap(interp_channel, in_axes=2, out_axes=1)(dW_convolved)  # shape (C, N)
+        return Phi_dW
+            
 
 class SDEFactory:
-    """Factory class for creating different SDE instances."""
-
+    """
+    Factory class for creating different SDE instances.
+    """
     @staticmethod
-    def create(sde_type: str, **kwargs) -> BaseSDE:
-        """
-        Create an SDE instance based on the given type and parameters.
-
-        Args:
-            sde_type (str): The type of SDE to create.
-            **kwargs: Additional parameters for the SDE initialization.
-
-        Returns:
-            BaseSDE: An instance of the specified SDE.
-
-        Raises:
-            ValueError: If an unknown SDE type is provided.
-        """
+    def create(sde_type, sde_config):
         sde_classes = {
             "brownian": BrownianSDE,
-            "ou": OUSDE,
-            "lagrangian": LagrangianSDE,
             "eulerian": EulerianSDE,
         }
 
@@ -272,35 +210,4 @@ class SDEFactory:
             raise ValueError(f"Unknown SDE type: {sde_type}")
 
         sde_class = sde_classes[sde_type.lower()]
-        return sde_class(**kwargs)
-
-    @staticmethod
-    def get_default_params(sde_type: str) -> Dict[str, Any]:
-        """
-        Get the default parameters for a given SDE type.
-
-        Args:
-            sde_type (str): The type of SDE.
-
-        Returns:
-            Dict[str, Any]: A dictionary of default parameters.
-
-        Raises:
-            ValueError: If an unknown SDE type is provided.
-        """
-        default_params = {
-            "brownian": {"sigma": 1.0, "X0": None},
-            "ou": {"sigma": 1.0, "theta": 1.0, "X0": None},
-            "lagrangian": {"sigma": 1.0, "kappa": 0.1, "X0": None},
-            "eulerian": {
-                "sigma": 1.0,
-                "kappa": 0.1,
-                "W_shape": (50, 50),
-                "W_range": ((-0.5, 1.5), (-0.5, 1.5))
-            }
-        }
-
-        if sde_type.lower() not in default_params:
-            raise ValueError(f"Unknown SDE type: {sde_type}")
-
-        return default_params[sde_type.lower()]
+        return sde_class(sde_config)

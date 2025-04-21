@@ -1,80 +1,80 @@
-from __future__ import annotations
-from typing import Dict, Any, Tuple
 from functools import partial
 
 import jax
 import jax.numpy as jnp
+import jax.random as jr
 
-from .sde import SDEFactory
-from ..utils.solver import Wiener, EulerMaruyama, SamplePath
+from bridgeop.diffusion.sde import SDEFactory
 
 class DiffusionBridge:
-    """ The diffuser class for several utilities in the training, including:
-        - get reverse diffusion bridge from a defined `model`: self.get_reverse_diffusion_bridge()
-        - compute b based on the trajectories: self.get_bs()
-        - solve forward SDE: self.solve_forward_sde()
-        - solve reverse SDE: self.solve_reverse_sde()
-        - get trajectory generator: self.get_trajectory_generator()
-        - compute loss: self.dsm_loss()
-        
+    """
+    DiffusionBridge: A class for handling forward and reverse processes in diffusion bridges.
+    This class provides methods for solving forward unconditioned SDEs (for training),
+    reverse bridge SDEs (for inference), and computing DSM losses.
+    Attributes:
+        sde: An SDE instance created by SDEFactory based on the specified type and config.
+    Methods:
+        __init__(sde_type, sde_config): Initialize with specified SDE type and configuration.
+        solve_forward_sde(rng_key, x0): Solve the forward SDE process starting from initial point x0.
+        solve_reverse_bridge(rng_key, xT, model): Solve the reverse bridge process starting from terminal point xT.
+        dsm_loss(preds, bs): Calculate denoising score matching loss between predictions and targets.
     """
 
-    def __init__(
-            self, 
-            sde_name: str, 
-            sde_kwargs: Dict[str, Any],
-            dt: float = 1e-2):
-        self.sde = SDEFactory.create(sde_name, **sde_kwargs)
+    def __init__(self, sde_type, sde_config):
+        self.sde = SDEFactory.create(sde_type, sde_config)
+
+    @partial(jax.jit, static_argnums=(0,))
+    def solve_forward_sde(self, rng_key, x0):
+        dWs = jr.normal(rng_key, shape=(self.sde.n_steps,) + self.sde.bm_shape) * jnp.sqrt(self.sde.dt)
         
-        self.wiener = Wiener(sde_kwargs["W_shape"], sde_kwargs["T"], dt=dt)
-        self.sde_solver = EulerMaruyama(
-            sde=self.sde, 
-            wiener=self.wiener
+        def scan_body(carry, val):
+            x, t = carry
+            dt, dW = val
+            drift = self.sde.f(t, x) * dt
+            Phi = self.sde.g(t, x)
+            diffusion = self.sde.apply_g(Phi, dW)
+            x_next = x + drift + diffusion
+            t_next = t + dt
+            b = - diffusion / dt
+            return (x_next, t_next), (x_next, t_next, b)
+            
+        *_, (xs, ts, bs) = jax.lax.scan(
+            scan_body,
+            init=(x0, jnp.array(0.0)),
+            xs=(self.sde.dts, dWs),
+            length=self.sde.n_steps
         )
-        self.dt = dt
 
-    def get_bs(self, xs: jnp.ndarray, ts: jnp.ndarray) -> jnp.ndarray:
-        """ Compute the small step gradient approximation based on the simulated trajectories
-
-        Args:
-            xs (jnp.ndarray): simulated trajectories of shape (time_steps, dim)
-            ts (jnp.ndarray): time steps of the trajectories of shape (time_steps,)
-            scaling (str, optional): scaling factor, can be None, "inv_g", "inv_g2" or None. Defaults to be None.
-
-        Returns:
-            jnp.ndarray: _description_
-        """
-        diff_xs = xs[1:] - xs[:-1] - jax.vmap(lambda t, x: self.sde.f(t, x))(ts[:-1], xs[:-1]) * self.dt
-        bs = - diff_xs / self.dt
-        return bs
-
-    @partial(jax.jit, static_argnums=(0, 3))
-    def solve_forward_sde(self, rng_key: jax.Array, x0: jnp.ndarray, n_batches: int) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-        sol = self.sde_solver.solve(rng_key, x0, n_batches)
-        xs, ts = sol.xs, sol.ts
-        
-        bs = jax.vmap(
-            self.get_bs,
-            in_axes=(0, None),
-            out_axes=0
-        )(xs, ts)
-
-        return xs[:, 1:], ts[1:], bs        # X(t_{n}), t_{n}, b(X(t_{n}), X(t_{n-1}))
+        return xs, ts, bs        # x, s, b_s(x; x(t_{n-1}))
     
-    # @partial(jax.jit, static_argnums=(0, 2, 3), static_argnames=("model",))
-    def solve_reverse_bridge(self, rng_key: jax.Array, xT: jnp.ndarray, n_batches: int,model = None, return_drift: bool = False) -> SamplePath:
+    def solve_reverse_bridge(self, rng_key, xT, model):
+        dWs = jr.normal(rng_key, shape=(self.sde.n_steps,) + self.sde.bm_shape) * jnp.sqrt(self.sde.dt)
+        reversed_sde = self.sde.get_reverse_bridge(self.sde, model)
         
-        reverse_bridge = self.sde.get_reverse_bridge(model)
-        reverse_bridge_solver = EulerMaruyama(reverse_bridge, self.wiener)
-        sol = reverse_bridge_solver.solve(rng_key, x0=xT, n_batches=n_batches, return_drift=return_drift)
-
-        return sol
+        def scan_body(carry, val):
+            y, t = carry
+            dt, dW = val
+            drift = reversed_sde.f(t, y) * dt
+            Phi = reversed_sde.g(t, y)
+            diffusion = reversed_sde.apply_g(Phi, dW)
+            y_next = y + drift + diffusion
+            tau_next = t + dt
+            return (y_next, tau_next), (y_next)
+            
+        *_, ys = jax.lax.scan(
+            scan_body,
+            init=(xT, jnp.array(0.0)),
+            xs=(self.sde.dts, dWs),
+            length=self.sde.n_steps,
+        )
+        
+        return ys
     
-    def dsm_loss(self, outputs: jnp.ndarray, bs: jnp.ndarray):
-        b, t, *_, d = outputs.shape
-        loss = (outputs - bs).reshape(b, t, -1, d)
-        loss = jnp.mean(jnp.linalg.norm(loss, axis=-1)**2, axis=-1) 
-        loss = jnp.sum(loss, axis=1) * self.dt
+    def dsm_loss(self, preds, bs):
+        b, t, *_, d = preds.shape
+        loss = (preds - bs).reshape(b, t, -1, d)
+        loss = jnp.mean(jnp.sum(jnp.square(loss), axis=-1), axis=-1) 
+        loss = jnp.sum(loss, axis=1) * self.sde.dt
         loss = 0.5 * jnp.mean(loss, axis=0)
         return loss
     
