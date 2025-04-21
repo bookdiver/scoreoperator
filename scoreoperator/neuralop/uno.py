@@ -1,7 +1,7 @@
 import jax.numpy as jnp
 from flax import linen as nn
 
-from bridgeop.neuralop.blocks import (
+from scoreoperator.neuralop.blocks import (
     Block1D, Block2D, TimeEmbedding
 )
 

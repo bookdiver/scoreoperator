@@ -4,7 +4,7 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 
-from bridgeop.diffusion.sde import SDEFactory
+from scoreoperator.diffusion.sde import SDEFactory
 
 class DiffusionBridge:
     """

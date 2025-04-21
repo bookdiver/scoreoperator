@@ -3,7 +3,7 @@ import jax
 import jax.random as jr
 
 from flax import linen as nn
-from bridgeop.neuralop.uno import CTUNO1D, CTUNO2D
+from scoreoperator.neuralop.uno import CTUNO1D, CTUNO2D
 
 @pytest.fixture
 def rng():

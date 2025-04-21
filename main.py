@@ -1,12 +1,11 @@
 import argparse
 import os
-import jax.numpy as jnp
 
-from bridgeop.utils.trainer import TrainerModule
-from bridgeop.utils.data import DataFactory
-from bridgeop.utils.configs import load_config
-from bridgeop.neuralop.uno import ModelFactory
-from bridgeop.diffusion.bridge import DiffusionBridge
+from scoreoperator.neuralop.uno import ModelFactory
+from scoreoperator.diffusion.bridge import DiffusionBridge
+from scoreoperator.utils.trainer import TrainerModule
+from scoreoperator.utils.data import DataFactory
+from scoreoperator.utils.configs import load_config
 
 def main(args):
     # Get the specific configuration for the chosen experiment
