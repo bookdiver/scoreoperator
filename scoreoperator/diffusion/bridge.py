@@ -47,8 +47,10 @@ class DiffusionBridge:
 
         return xs, ts, bs        # x, s, b_s(x; x(t_{n-1}))
     
-    def solve_reverse_bridge(self, rng_key, xT, model):
+    def solve_reverse_bridge(self, rng_key, x0, xT, model):
         dWs = jr.normal(rng_key, shape=(self.sde.n_steps,) + self.sde.bm_shape) * jnp.sqrt(self.sde.dt)
+        self.sde.x0 = x0
+        self.sde.xT = xT
         reversed_sde = self.sde.get_reverse_bridge(self.sde, model)
         
         def scan_body(carry, val):
