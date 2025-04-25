@@ -11,14 +11,16 @@ class BaseSDE(abc.ABC):
     n_steps: int
     ts: jnp.ndarray
     dts: jnp.ndarray
-    x_shape: tuple[int]
+    x0: jnp.ndarray
+    xT: jnp.ndarray
     bm_shape: tuple[int]
 
     def __init__(self, config):
         super().__init__()
         self.T = config['T']
         self.dt = config['dt']
-        self.x_shape = config['x_shape']
+        self.x0 = config['x0']
+        self.xT = config['xT']
         self.bm_shape = config['bm_shape']
         
     @property
@@ -63,7 +65,8 @@ class BaseSDE(abc.ABC):
         reversed_sde_config = {
             'T': forward_sde.T,
             'dt': forward_sde.dt,
-            'x_shape': forward_sde.x_shape,
+            'x0': forward_sde.xT,
+            'xT': forward_sde.x0,
             'bm_shape': forward_sde.bm_shape
         }
         
@@ -161,24 +164,29 @@ class EulerianSDE(BaseSDE):
         return jnp.zeros_like(x)
     
     def g(self, t, x):
-        return x # NOTE: it is not formally true, as we will use x to compute Phi dW
+        return x + self.x0 # NOTE: it is not formally true, as we will use x to compute Phi dW
 
+    @partial(jax.jit, static_argnums=(0,))
     def apply_g(self, Phi, dW):
-        coords_to_pixels = lambda x: 24 * x + jnp.array([32, 32])[jnp.newaxis, :]
-        
         window_size = 17
-        window_span = (-2.5, 2.5)
+        window_span = (-2.0, 2.0)
+        scaling = jnp.abs(self.bm_shape[0] / (window_span[0] - window_span[1]))
+        center = jnp.array([self.bm_shape[0] / 2, self.bm_shape[1] / 2])
+        
+        coords_to_pixels = lambda x: scaling * x + center[jnp.newaxis, :]
+        
         delta_x = (window_span[1] - window_span[0]) / (window_size - 1)
         window_xs = jnp.linspace(*window_span, window_size)
-        window_amp = self.k_alpha * delta_x
         window_scale = self.k_sigma / delta_x
         
-        def convolution_window(span, amp, scale):
-            return amp * jnp.sqrt(2.0 * jnp.pi) \
-                * jsp.stats.norm.pdf(span, 0, scale) \
+        def convolution_window(span, scale):
+            window = jsp.stats.norm.pdf(span, 0, scale) \
                     * jsp.stats.norm.pdf(span[:, None], 0, scale)
-                    
-        window = convolution_window(window_xs, window_amp, window_scale)
+            window /= jnp.sqrt(jnp.sum(window**2, axis=(0, 1)))
+            return window
+        
+        normalized_window = convolution_window(window_xs, window_scale)
+        window = self.k_alpha * normalized_window
         dW_convolved = jax.vmap(
             partial(jsp.signal.convolve, mode="same"),
             in_axes=(2, None),

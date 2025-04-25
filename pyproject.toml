@@ -32,7 +32,7 @@ gpu = ["jax[cuda12]"]
 "Homepage" = "https://github.com/bookdiver/scoreoperator"
 
 [tool.setuptools.packages.find]
-where = ["scoreoperator"]
+where = ["."]
 
 [tool.setuptools.package-data]
 "*" = ["*.txt", "*.rst"]

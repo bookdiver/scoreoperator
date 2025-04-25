@@ -166,5 +166,3 @@ cython_debug/
 
 settings.json
 
-# docs
-ckpts

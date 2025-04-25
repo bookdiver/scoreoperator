@@ -1,6 +1,7 @@
 from absl import logging
 logging.set_verbosity(logging.ERROR)
 import time
+import os
 
 import jax
 import jax.numpy as jnp
@@ -60,6 +61,27 @@ class TrainerModule:
 
         self._create_train_function()
         self._init_model()
+     
+    def get_ckpt_dir(self):
+        try:
+            # Get the project root directory - going up from the current file location
+            current_file = os.path.abspath(__file__)
+            project_root = os.path.dirname(
+                os.path.dirname(
+                    os.path.dirname(current_file)
+                )
+            )
+            
+            # Create absolute checkpoint directory path
+            abs_ckpt_dir = os.path.join(project_root, self.dir.lstrip('/'))
+            
+            if not os.path.exists(abs_ckpt_dir):
+                print(f"Warning: Checkpoint directory does not exist: {abs_ckpt_dir}")
+                return None
+            
+            return abs_ckpt_dir
+        except Exception as e:
+            print(f"Error determining checkpoint path: {str(e)}")
 
     def _create_train_function(self):
         
@@ -94,7 +116,7 @@ class TrainerModule:
         self.train_step = jax.jit(train_step)
 
     def _init_model(self):
-        dummy_xs = jnp.zeros((1, 1, *self.db.sde.x_shape))
+        dummy_xs = jnp.zeros((1, 1, *self.db.sde.x0.shape))
         dummy_ts = jnp.zeros((1, 1, ))
         dummy_xs_flatten = flatten_batch(dummy_xs)
         dummy_ts_flatten = flatten_batch(dummy_ts)
@@ -135,14 +157,24 @@ class TrainerModule:
             tx=optimizer
         )
     
-    def train_model(self, x0, mode='train'):
+    def train_model(self, x0, mode='train', resume_step=None):
         if mode == 'train':
             self._init_optimizer()
         elif mode == 'pretrained':
-            self.load_model(prefix="checkpoint_", step=self.n_iters)
+            self.load_model(prefix="checkpoint_", step=None)
             return None
+        elif mode == 'resume':
+            if resume_step is None:
+                raise ValueError("resume_step must be provided for resuming training.")
+                
+            self.load_model(prefix="checkpoint_", step=resume_step)
+            print(f"Resuming training from iteration {resume_step}")
+            # Initialize optimizer with loaded state
+            self._init_optimizer()
+            # Use the loaded state's step as the starting point
+            start_iter = resume_step + 1
         else:
-            raise ValueError("Invalid mode. Choose 'train', or 'pretrained'.")
+            raise ValueError("Invalid mode. Choose 'train', 'resume', or 'pretrained'.")
 
         all_train_losses = []
         all_train_times = []
@@ -150,9 +182,11 @@ class TrainerModule:
         tmp_train_loss = 0.0
 
         stage_start_time = time.time()
-        print(f"Training started, total iterations: {self.n_iters}")
+        # Use the correct starting iteration based on mode
+        start_iter = 1 if mode != 'resume' else start_iter
+        print(f"Training started, iterations: {start_iter} to {self.n_iters}")
         train_rng_key, _ = jax.random.split(self.rng_key)
-        for i in range(1, self.n_iters+1):
+        for i in range(start_iter, start_iter + self.n_iters+1):
             iter_start_time = time.time()
             
             current_rng_key = jr.fold_in(train_rng_key, i)
@@ -174,17 +208,23 @@ class TrainerModule:
                 avg_train_loss = tmp_train_loss / self.log_freq
                 tmp_train_loss = 0.0
                 stage_running_time = time.time() - stage_start_time
-                print(f"Iter [{i:<5} / {self.n_iters}]:")
+                print(f"Iter [{i:<5} / {self.n_iters + start_iter}]:")
                 print("Stage statistics:")
                 print(f"avg train loss: {avg_train_loss:.4f}, stage running time: {stage_running_time:.4f}s")
                 stage_start_time = time.time()
-                # self.save_model(step=i)
 
-        with open(self.dir + "/records.txt", "w") as f:
-            f.write("Loss, Time\n")  # Add header for the two columns
-            for loss, time_spent in zip(all_train_losses, all_train_times):
-                f.write(f"{loss}, {time_spent}\n")
-        self.save_model(step=self.n_iters)
+        # For resumed training, append to existing records if they exist
+        if mode == 'resume' and os.path.exists(self.dir + "/records.txt"):
+            with open(self.dir + "/records.txt", "a") as f:
+                for loss, time_spent in zip(all_train_losses, all_train_times):
+                    f.write(f"{loss}, {time_spent}\n")
+        else:
+            with open(self.dir + "/records.txt", "w") as f:
+                f.write("Loss, Time\n")  # Add header for the two columns
+                for loss, time_spent in zip(all_train_losses, all_train_times):
+                    f.write(f"{loss}, {time_spent}\n")
+        
+        self.save_model(step=self.n_iters + start_iter-1)
 
         print(f"Model saved to {self.dir + '/pretrained'}")
         print(f"Training loss saved to {self.dir + '/records.txt'}")
@@ -207,7 +247,7 @@ class TrainerModule:
     def save_model(self, step):
         try:
             ckpt_path = checkpoints.save_checkpoint(
-                ckpt_dir=self.dir,
+                ckpt_dir=self.get_ckpt_dir(),
                 target={
                     "params": self.state.params,
                     "batch_stats": self.state.batch_stats,
@@ -227,10 +267,12 @@ class TrainerModule:
             return None
     
     def load_model(self, prefix, step):
-        ckpt = checkpoints.restore_checkpoint(ckpt_dir=self.dir, 
-                                              target=None,
-                                              step=step,
-                                              prefix=prefix)
+        ckpt = checkpoints.restore_checkpoint(
+            ckpt_dir=self.get_ckpt_dir(), 
+            target=None,
+            step=step,
+            prefix=prefix
+        )
         if self.state is None:
             self._init_optimizer()
         

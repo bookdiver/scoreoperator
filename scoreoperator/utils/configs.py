@@ -21,7 +21,6 @@ def load_toy_brownian_config():
     config.db.sde_config.T = 1.0
     config.db.sde_config.dt = 0.02
     config.db.sde_config.sigma = 0.1
-    config.db.sde_config.x_shape = (8, 1)
     config.db.sde_config.bm_shape = (8, 1)
     
     config.model_type = "CTUNO1D"
@@ -60,7 +59,6 @@ def load_ellipsoid_brownian_config():
     config.sde_config.T = 1.0
     config.sde_config.dt = 0.02
     config.sde_config.sigma = 0.1
-    config.sde_config.x_shape = (16, 16, 3)
     config.sde_config.bm_shape = (16, 16, 3)
     
     config.model_type = "CTUNO2D"
@@ -80,33 +78,31 @@ def load_ellipsoid_brownian_config():
     return config
 
 def load_butterfly_eulerian_config():
-    config.data.data_type = "butterfly"
-    config.data.x0 = ConfigDict()
-    config.data.x0.name = "allancastria_cerisyi"
-    config.data.xT = ConfigDict()
-    config.data.xT.name = "archon_apollinus"
+    config.data_type = "butterfly"
+    config.x0_config.name = "archon_apollinus"
+    config.xT_config.name = "battus_polydamas"
     
-    config.db.sde_type = "eulerian"
-    config.db.sde_config = ConfigDict()
-    config.db.sde_config.T = 1.0
-    config.db.sde_config.dt = 0.01
-    config.db.sde_config.x_shape = (32, 2)
-    config.db.sde_config.bm_shape = (100, 100, 2)
-    config.db.sde_config.k_alpha = 0.1
-    config.db.sde_config.k_sigma = 0.1
+    config.sde_type = "eulerian"
+    config.sde_config.T = 1.0
+    config.sde_config.dt = 0.01
+    config.sde_config.bm_shape = (100, 100, 2)
+    config.sde_config.k_alpha = 0.12
+    config.sde_config.k_sigma = 0.3
     
-    config.model.d_u = 2
-    config.model.d_v = 2
-    config.model.c = 32
-    config.model.d_ls = (32, 32, 32, 32)
-    config.model.modes_ls = (12, 8, 6)
+    config.model_type = "CTUNO1D"
+    config.model_config.d_u = 2
+    config.model_config.d_v = 2
+    config.model_config.c = 32
+    config.model_config.d_ls = (16, 32, 64, 64)
+    config.model_config.modes_ls = (16, 8, 6)
     
-    config.training.dir = "../ckpts/butterfly_eulerian"
-    config.training.seed = 42
-    config.training.lr = 1.0e-3
-    config.training.batch_size = 16
-    config.training.n_iters = 10000
-    config.training.log_freq = 1000
+    config.train_config.dir = "ckpts/butterfly_eulerian"
+    config.train_config.seed = 42
+    config.train_config.train_shape = (30, 2)
+    config.train_config.lr = 1.0e-3
+    config.train_config.batch_size = 16
+    config.train_config.n_iters = 20000
+    config.train_config.log_freq = 1000
     
     return config
     
@@ -119,3 +115,23 @@ def load_config(experiment_name):
         return load_butterfly_eulerian_config()
     else:
         raise ValueError(f"Unknown experiment name: {experiment_name}")
+    
+def update_config(update_dict):
+    """
+    Update the global config with values from a dictionary.
+    
+    Args:
+        update_dict (dict): Dictionary with configuration updates
+    
+    Returns:
+        The updated config object
+    """
+    def _update_config_dict(config_dict, update_dict):
+        for key, value in update_dict.items():
+            if isinstance(value, dict) and key in config_dict and isinstance(config_dict[key], ConfigDict):
+                _update_config_dict(config_dict[key], value)
+            else:                                      
+                config_dict[key] = value
+    
+    _update_config_dict(config, update_dict)
+    return config

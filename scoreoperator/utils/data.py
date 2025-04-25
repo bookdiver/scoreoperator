@@ -89,7 +89,7 @@ class Butterfly(BaseData):
 
     def __init__(self, name):
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        path = os.path.join(current_dir, "../../../landmarks_raw/normalized", f"{name}.npy")
+        path = os.path.join(current_dir, "../../landmarks_raw/normalized", f"{name}.npy")
         path = os.path.normpath(path)
         
         try:
@@ -101,10 +101,10 @@ class Butterfly(BaseData):
         do_interpolate = shape[0] > len(self.raw_pts)
         
         if do_interpolate:
-            ts = np.linspace(0, 1., len(self.pts), endpoint=False)
-            interp_ts = np.linspace(0, 1., shape[0], endpoint=False)
-            fx = interp1d(ts, self.pts[:, 0], kind='linear')
-            fy = interp1d(ts, self.pts[:, 1], kind='linear')
+            ts = np.linspace(0, 1., len(self.raw_pts))
+            interp_ts = np.linspace(0, 1., shape[0])
+            fx = interp1d(ts, self.raw_pts[:, 0], kind='linear')
+            fy = interp1d(ts, self.raw_pts[:, 1], kind='linear')
             return jnp.stack([fx(interp_ts), fy(interp_ts)], axis=-1)
         else:
             spacing = len(self.raw_pts) // shape[0]
@@ -115,7 +115,7 @@ class Butterfly(BaseData):
             x = self.raw_pts[indices, 0]
             y = self.raw_pts[indices, 1]
             evaluation = jnp.stack([x, y], axis=-1)
-            assert evaluation.shape == shape
+            assert evaluation.shape == shape, f"Expected shape {shape}, but got {evaluation.shape}"
             return evaluation   
 
 class DataFactory:
