@@ -18,6 +18,7 @@ dependencies = [
     "scipy",
     "flax",
     "optax",
+    "ipykernel",
     "matplotlib",
     "ml_collections",
     "pytest",
