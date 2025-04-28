@@ -2,6 +2,7 @@ from absl import logging
 logging.set_verbosity(logging.ERROR)
 import time
 import os
+from functools import partial
 
 import jax
 import jax.numpy as jnp
@@ -116,7 +117,7 @@ class TrainerModule:
         self.train_step = jax.jit(train_step)
 
     def _init_model(self):
-        dummy_xs = jnp.zeros((1, 1, *self.db.sde.x0.shape))
+        dummy_xs = jnp.zeros((1, 1, *self.db.projected_sde.x_shape))
         dummy_ts = jnp.zeros((1, 1, ))
         dummy_xs_flatten = flatten_batch(dummy_xs)
         dummy_ts_flatten = flatten_batch(dummy_ts)
@@ -157,7 +158,7 @@ class TrainerModule:
             tx=optimizer
         )
     
-    def train_model(self, x0, mode='train', resume_step=None):
+    def train_model(self, mode='train', resume_step=None):
         if mode == 'train':
             self._init_optimizer()
         elif mode == 'pretrained':
@@ -191,10 +192,7 @@ class TrainerModule:
             
             current_rng_key = jr.fold_in(train_rng_key, i)
             sub_keys = jr.split(current_rng_key, self.batch_size)
-            xss, tss, bss = jax.vmap(
-                self.db.solve_forward_sde,
-                in_axes=(0, None)
-            )(sub_keys, x0)
+            xss, tss, bss = jax.vmap(self.db.solve_forward_sde)(sub_keys)
             batch = (xss, tss, bss)
             self.state, loss = self.train_step(self.state, batch)
             iter_running_time = time.time() - iter_start_time
@@ -229,20 +227,6 @@ class TrainerModule:
         print(f"Model saved to {self.dir + '/pretrained'}")
         print(f"Training loss saved to {self.dir + '/records.txt'}")
         print(f"Training finished in {sum(all_train_times)/60:.4f}m ({sum(all_train_times):.4f}s)")
-            
-    def infer_model(self, batch):
-        xss_flat, tss_flat = batch
-        outss_flat = self.state.apply_fn(
-            variables={
-                "params": self.state.params, 
-                "batch_stats": self.state.batch_stats
-            },
-            x=xss_flat,
-            t=tss_flat,
-            train=False,
-            mutable=False
-        )
-        return outss_flat
 
     def save_model(self, step):
         try:
@@ -266,12 +250,12 @@ class TrainerModule:
             print(f"Failed to save model checkpoint: {str(e)}")
             return None
     
-    def load_model(self, prefix, step):
+    def resume_model(self, step):
         ckpt = checkpoints.restore_checkpoint(
             ckpt_dir=self.get_ckpt_dir(), 
             target=None,
             step=step,
-            prefix=prefix
+            prefix="checkpoint_"
         )
         if self.state is None:
             self._init_optimizer()
@@ -285,16 +269,51 @@ class TrainerModule:
             step=step
         )
         self.rng_key = ckpt["rng_key"]
-        print(f"Model loaded from {self.dir}/{prefix}_step_{step}")
+        print(f"Model resumed from {self.dir}/checkpoint_{step}")
+        
+    @classmethod
+    def load_model(cls, model, load_dir, step):
+        try:
+            ckpt = checkpoints.restore_checkpoint(
+                ckpt_dir=load_dir,
+                target=None,
+                step=step,
+                prefix="checkpoint_"
+            )
+        except Exception as e:
+            print(f"Failed to load model checkpoint: {str(e)}")
+            return None
+        
+        state = TrainState(
+            apply_fn=model.apply,
+            params=ckpt["params"],
+            tx=None,
+            batch_stats=ckpt["batch_stats"],
+            opt_state=None,
+            step=step
+        )
+        
+        return state
         
 class ScoreModel:
     """ This model serves as the wrapper for the trained nn to fit in the reverse bridge solver 
     """
-    def __init__(self, trainer):
-        self.infer = jax.jit(trainer.infer_model)
+    def __init__(self, model, ckpt_dir, step = None):
+        ckpt_dir = os.path.abspath(ckpt_dir)
+        self.state = TrainerModule.load_model(model, ckpt_dir, step)
 
+    @partial(jax.jit, static_argnums=(0,))
     def __call__(self, t, x):
         x_expanded = jnp.expand_dims(x, axis=0)
         t_expanded = jnp.full((1,), t)
-        out = self.infer((x_expanded, t_expanded))
+        out = self.state.apply_fn(
+            variables={
+                "params": self.state.params,
+                "batch_stats": self.state.batch_stats
+            },
+            x=x_expanded,
+            t=t_expanded,
+            train=False,
+            mutable=False
+        )
         return out.squeeze(axis=0)

@@ -1,3 +1,9 @@
+"""
+Stochastic Differential Equation (SDE) implementations for diffusion bridges.
+
+This module provides implementations of various SDEs used in diffusion bridges,
+including base abstract class, Cylindrical Brownian motion SDE, and Kunita SDE.
+"""
 import abc
 from functools import partial
 
@@ -5,35 +11,18 @@ import jax
 import jax.numpy as jnp
 import jax.scipy as jsp
 
+from scoreoperator.utils.data import BaseData, Zero
+
 class BaseSDE(abc.ABC):
     T: float
-    dt: float
-    n_steps: int
-    ts: jnp.ndarray
-    dts: jnp.ndarray
-    x0: jnp.ndarray
-    xT: jnp.ndarray
-    bm_shape: tuple[int]
+    x0: BaseData
+    xT: BaseData
 
     def __init__(self, config):
         super().__init__()
         self.T = config['T']
-        self.dt = config['dt']
         self.x0 = config['x0']
         self.xT = config['xT']
-        self.bm_shape = config['bm_shape']
-        
-    @property
-    def ts(self):
-        return jnp.arange(0.0, self.T + self.dt, self.dt)
-    
-    @property
-    def n_steps(self):
-        return len(self.ts) - 1
-    
-    @property
-    def dts(self):
-        return jnp.diff(self.ts)
         
     @abc.abstractmethod
     def f(self, t, x):
@@ -44,56 +33,60 @@ class BaseSDE(abc.ABC):
         pass
     
     @abc.abstractmethod
+    @partial(jax.jit, static_argnums=(0,))
     def apply_g(self, Phi, dW):
-        """ Apply the Hilbert-Schmidt operator Phi=g(X(t)) on the Wiener process dW
-        """
         pass
+    
+    def project(self, x_shape, t_shape, w_shape):
+        return ProjectedSDE(self.f, self.g, self.apply_g, self.x0, self.xT, self.T, t_shape, x_shape, w_shape)
 
     @staticmethod
-    def get_reverse_bridge(forward_sde, score):
-        """ Get the reverse bridge SDE from the additional drift model.
-
-        Args:
-            model (Model): a wrapped model class that acts as the approximation of the additional drift.
-
-        Raises:
-            ValueError: Unknown model matching object
-
-        Returns:
-            BaseSDE: reverse bridge SDE class
-        """
-        reversed_sde_config = {
-            'T': forward_sde.T,
-            'dt': forward_sde.dt,
-            'x0': forward_sde.xT,
-            'xT': forward_sde.x0,
-            'bm_shape': forward_sde.bm_shape
-        }
+    def get_reverse_projected_bridge(forward_sde, score, x_shape, t_shape, w_shape, xT = None):
+        T = forward_sde.T
+        x0 = forward_sde.x0
+        xT = forward_sde.xT if xT is None else xT
         
-        forward_f = forward_sde.f
-        forward_g = forward_sde.g
-        forward_apply_g = forward_sde.apply_g
+        projected_sde = forward_sde.project(x_shape, t_shape, w_shape)
         
-        class ReverseSDE(BaseSDE):
-            def __init__(self):
-                super().__init__(reversed_sde_config)
-
-            def f(self, t, y):
-                tau = self.T - t
-                return -forward_f(tau, y) + score(tau, y)
-            
-            def g(self, t, y):
-                tau = self.T - t
-                return forward_g(tau, y)
-            
-            def apply_g(self, Phi, dW):
-                return forward_apply_g(Phi, dW)
+        reversed_f = lambda t, x: -projected_sde.f(T - t, x) + score(T - t, x)
+        reversed_g = lambda t, x: projected_sde.g(T - t, x)
+        reversed_apply_g = lambda Phi, dW: projected_sde.apply_g(Phi, dW)
         
-        return ReverseSDE()
+        return ProjectedSDE(reversed_f, reversed_g, reversed_apply_g, xT, x0, T, t_shape, x_shape, w_shape)
+        
+class ProjectedSDE:
+    f: callable
+    g: callable
+    apply_g: callable
+    x0_: jnp.ndarray
+    xT_: jnp.ndarray
+    T: float
+    t_shape: tuple
+    x_shape: tuple
+    w_shape: tuple
+    ts: jnp.ndarray
+    dt: jnp.ndarray
     
-class BrownianSDE(BaseSDE):
-    """ Brownian motion SDE: dX(t) = sigma * dW(t)
-    """
+    def __init__(self, f, g, apply_g, x0, xT, T, t_shape, x_shape, w_shape):
+        self.f = f
+        self.g = g
+        self.apply_g = apply_g
+        self.T = T
+        self.t_shape = t_shape
+        self.x_shape = x_shape
+        self.w_shape = w_shape
+        self.x0_ = x0.eval(x_shape)
+        self.xT_ = xT.eval(x_shape)
+        
+    @property
+    def ts(self):
+        return jnp.linspace(0., self.T, self.t_shape[0], endpoint=False)
+    
+    @property
+    def dt(self):
+        return self.T / self.t_shape[0]
+    
+class CylindricalBrownianSDE(BaseSDE):
     sigma: float
     
     def __init__(self, config):
@@ -109,49 +102,8 @@ class BrownianSDE(BaseSDE):
     def apply_g(self, Phi, dW):
         return self.sigma * dW
 
-    
 
-# class LagrangianSDE(BaseSDE):
-#     """ Lagrangian SDE: dX(t) = Q^{1/2}(X(t)) dW(t) with noise fields assigned to each landmark, 
-#         see ``Stochastic flows and shape bridges, S. Sommer et al.'' for details.
-#     """
-#     def __init__(self, 
-#                  sigma: float = 1.0, 
-#                  kappa: float = 0.1,
-#                  **kwargs):
-#         super().__init__(**kwargs)
-#         self.sigma = sigma
-#         self.kappa = kappa
-    
-#     def f(self, t: float, x: jnp.ndarray) -> jnp.ndarray:
-#         return jnp.zeros_like(x)
-    
-#     def g(self, t: float, x: jnp.ndarray, eps: float = 1e-6) -> jnp.ndarray:
-#         """ Diffusion term of the Lagrangian SDE defined by the Gaussian kernel k(x, y) = sigma * exp(-||x-y||^2 / kappa^2).
-#             The covariance is computed between the landmarks.
-
-#         Args:
-#             t (float): time step.
-#             x (jnp.ndarray): flatten function evaluation x, shape (n_pts*co_dim, ).
-#             eps (float, optional): regularization to avoid singularity of the diffusion term. Defaults to 1e-4.
-
-#         Returns:
-#             jnp.ndarray: diffusion term, shape (n_pts*co_dim, n_pts*co_dim).
-#         """
-#         x = x.reshape(-1, 2)
-#         n_pts = x.shape[0]
-#         kernel_fn = lambda x: self.sigma * jnp.exp(-jnp.linalg.norm(x, axis=-1)**2 / self.kappa**2)
-#         dist = x[:, None, :] - x[None, :, :]
-#         kernel = kernel_fn(dist) + eps * jnp.eye(n_pts)     # Regularization to avoid singularity
-#         Q_half = jnp.einsum("ij,kl->ikjl", kernel, jnp.eye(2))
-#         Q_half = Q_half.reshape(2*n_pts, 2*n_pts)
-#         return Q_half
-
-class EulerianSDE(BaseSDE):
-    """ 
-    Eulerian SDE: dX(t) = Q^{1/2}(X(t)) dW(t) with noise fields acting on the whole domain, 
-    see ``Stochastic flows and shape bridges, S. Sommer et al.'' for details.
-    """
+class KunitaFlowSDE(BaseSDE):
     k_alpha: float
     k_sigma: float
     
@@ -164,54 +116,87 @@ class EulerianSDE(BaseSDE):
         return jnp.zeros_like(x)
     
     def g(self, t, x):
-        return x + self.x0 # NOTE: it is not formally true, as we will use x to compute Phi dW
+        return x
 
-    @partial(jax.jit, static_argnums=(0,))
     def apply_g(self, Phi, dW):
-        window_size = 17
-        window_span = (-2.0, 2.0)
-        scaling = jnp.abs(self.bm_shape[0] / (window_span[0] - window_span[1]))
-        center = jnp.array([self.bm_shape[0] / 2, self.bm_shape[1] / 2])
+        return None
+    
+    def project(self, x_shape, t_shape, w_shape):
+        w_span = (-2.0, 2.0)
+        scaling = jnp.abs(w_shape[0] / (w_span[1] - w_span[0]))
+        grid_spacing = 1.0 / scaling
+        center = jnp.array([w_shape[0] / 2, w_shape[1] / 2])
         
         coords_to_pixels = lambda x: scaling * x + center[jnp.newaxis, :]
         
-        delta_x = (window_span[1] - window_span[0]) / (window_size - 1)
-        window_xs = jnp.linspace(*window_span, window_size)
-        window_scale = self.k_sigma / delta_x
+        def make_gaussian_kernel_fft(w_shape, k_sigma, grid_spacing):
+            m, n = w_shape[:-1]
+            x = jnp.fft.fftfreq(m, grid_spacing)
+            y = jnp.fft.fftfreq(n, grid_spacing)
+            xx, yy = jnp.meshgrid(x, y, indexing='ij')
+            kernel_ft = jnp.exp(-2. * jnp.pi**2 * k_sigma**2 * (xx**2 + yy**2))
+            kernel_ft = kernel_ft / jnp.sqrt(jnp.sum(jnp.abs(kernel_ft)**2) / kernel_ft.size)
+            return kernel_ft
         
-        def convolution_window(span, scale):
-            window = jsp.stats.norm.pdf(span, 0, scale) \
-                    * jsp.stats.norm.pdf(span[:, None], 0, scale)
-            window /= jnp.sqrt(jnp.sum(window**2, axis=(0, 1)))
-            return window
+        kernel_ft = make_gaussian_kernel_fft(w_shape, self.k_sigma, grid_spacing)
         
-        normalized_window = convolution_window(window_xs, window_scale)
-        window = self.k_alpha * normalized_window
-        dW_convolved = jax.vmap(
-            partial(jsp.signal.convolve, mode="same"),
-            in_axes=(2, None),
-            out_axes=2
-        )(dW, window)
+        def g(t, x):
+            return self.g(t, x) + self.x0.eval(x_shape)
         
-        x_pixels = coords_to_pixels(Phi)  # shape (N, 2)
-        x_coords = x_pixels.T  # shape (2, N)
-
-        def interp_channel(channel):  # channel: shape (H, W)
-            return jsp.ndimage.map_coordinates(channel, x_coords, order=1, mode="nearest")
-
-        Phi_dW = jax.vmap(interp_channel, in_axes=2, out_axes=1)(dW_convolved)  # shape (C, N)
-        return Phi_dW
+        def apply_g(Phi, dW):
+            dW_convolved = jnp.stack([
+                jnp.fft.ifft2(kernel_ft * jnp.fft.fft2(dW[..., 0])).real,
+                jnp.fft.ifft2(kernel_ft * jnp.fft.fft2(dW[..., 1])).real,
+            ], axis=-1)
+            dW_convolved = self.k_alpha * dW_convolved
             
+            x_pixels = coords_to_pixels(Phi)  # shape (N, 2)
+            x_coords = x_pixels.T  # shape (2, N)
+
+            def interp_channel(channel):  # channel: shape (H, W)
+                return jsp.ndimage.map_coordinates(channel, x_coords, order=1, mode="nearest")
+
+            Phi_dW = jax.vmap(interp_channel, in_axes=2, out_axes=1)(dW_convolved)  # shape (C, N)
+            
+            return Phi_dW
+        
+        return ProjectedSDE(
+            self.f, 
+            g, 
+            apply_g, 
+            Zero(), 
+            self.xT - self.x0, 
+            self.T, 
+            t_shape, 
+            x_shape, 
+            w_shape
+        )
 
 class SDEFactory:
     """
     Factory class for creating different SDE instances.
+    
+    Provides a centralized way to create SDE objects based on type specification.
     """
     @staticmethod
     def create(sde_type, sde_config):
+        """
+        Create an SDE instance of the specified type.
+        
+        Args:
+            sde_type (str): Type of SDE to create ('cylindrical_brownian', 'kunita_flow').
+            sde_config (dict): Configuration for the SDE.
+            
+        Returns:
+            BaseSDE: The created SDE instance.
+            
+        Raises:
+            ValueError: If sde_type is not recognized.
+        """
         sde_classes = {
-            "brownian": BrownianSDE,
-            "eulerian": EulerianSDE,
+            "zero": Zero,
+            "cylindrical_brownian": CylindricalBrownianSDE,
+            "kunita_flow": KunitaFlowSDE,
         }
 
         if sde_type.lower() not in sde_classes:

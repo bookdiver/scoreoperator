@@ -9,7 +9,36 @@ class BaseData(abc.ABC):
     @abc.abstractmethod
     def eval(self, shape):
         pass
+    
+    def __add__(self, other):
+        return Addition(self, other)
+    
+    def __sub__(self, other):
+        return Subtraction(self, other)
+    
+class Addition(BaseData):
+    
+    def __init__(self, left, right):
+        self.left = left
+        self.right = right
         
+    def eval(self, shape):
+        return self.left.eval(shape) + self.right.eval(shape)
+    
+class Subtraction(BaseData):
+    
+    def __init__(self, left, right):
+        self.left = left
+        self.right = right
+        
+    def eval(self, shape):
+        return self.left.eval(shape) - self.right.eval(shape)
+    
+class Zero(BaseData):
+    
+    def eval(self, shape):
+        return jnp.zeros(shape)
+    
 class ToyFunction(BaseData):
     """ Toy quadratic function: f(x) = ax^2 + c, a function R->R"""
     a: float
@@ -123,6 +152,7 @@ class DataFactory:
     @staticmethod
     def create(data_type, data_config):
         data_classes = {
+            "zero": Zero,
             "toy": ToyFunction,
             "ellipse": Ellipse,
             "ellipsoid": Ellipsoid,
