@@ -162,19 +162,9 @@ cython_debug/
 # Latex compiled files
 *.bbl
 *.synctex.gz
+.DS_Store
 
-
-plot_results
-wandb
 settings.json
-pretrained
-results
-*.h5
-assets
-*.npy
-docs
-raw
-images
-images_wback
-neurips_paper_figures
-plots/ckpts
+
+ckpts/
+notebooks/

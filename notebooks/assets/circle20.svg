@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="345.903865pt" height="347.04pt" viewBox="0 0 345.903865 347.04" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2025-04-25T21:14:45.260601</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.10.1, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 347.04 
+L 345.903865 347.04 
+L 345.903865 -0 
+L 0 -0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="line2d_1">
+    <path d="M 323.635508 173.519995 
+L 315.414996 124.257175 
+L 291.644289 80.332747 
+L 254.899289 46.5066 
+L 209.161913 26.444336 
+L 159.38851 22.32 
+L 110.972783 34.58053 
+L 69.161354 61.897311 
+L 38.48513 101.310146 
+L 22.268358 148.548033 
+L 22.268367 198.492021 
+L 38.485157 245.729899 
+L 69.161426 285.142743 
+L 110.972838 312.459479 
+L 159.388592 324.72 
+L 209.161959 320.595646 
+L 254.899352 300.533346 
+L 291.644352 266.707163 
+L 315.415023 222.782752 
+L 323.635508 173.519969 
+" clip-path="url(#p73067be6ae)" style="fill: none; stroke: #000000; stroke-width: 2; stroke-linecap: square"/>
+    <defs>
+     <path id="mbc2d66cc40" d="M 0 3 
+C 0.795609 3 1.55874 2.683901 2.12132 2.12132 
+C 2.683901 1.55874 3 0.795609 3 0 
+C 3 -0.795609 2.683901 -1.55874 2.12132 -2.12132 
+C 1.55874 -2.683901 0.795609 -3 0 -3 
+C -0.795609 -3 -1.55874 -2.683901 -2.12132 -2.12132 
+C -2.683901 -1.55874 -3 -0.795609 -3 0 
+C -3 0.795609 -2.683901 1.55874 -2.12132 2.12132 
+C -1.55874 2.683901 -0.795609 3 0 3 
+z
+" style="stroke: #000000"/>
+    </defs>
+    <g clip-path="url(#p73067be6ae)">
+     <use xlink:href="#mbc2d66cc40" x="323.635508" y="173.519995" style="stroke: #000000"/>
+     <use xlink:href="#mbc2d66cc40" x="315.414996" y="124.257175" style="stroke: #000000"/>
+     <use xlink:href="#mbc2d66cc40" x="291.644289" y="80.332747" style="stroke: #000000"/>
+     <use xlink:href="#mbc2d66cc40" x="254.899289" y="46.5066" style="stroke: #000000"/>
+     <use xlink:href="#mbc2d66cc40" x="209.161913" y="26.444336" style="stroke: #000000"/>
+     <use xlink:href="#mbc2d66cc40" x="159.38851" y="22.32" style="stroke: #000000"/>
+     <use xlink:href="#mbc2d66cc40" x="110.972783" y="34.58053" style="stroke: #000000"/>
+     <use xlink:href="#mbc2d66cc40" x="69.161354" y="61.897311" style="stroke: #000000"/>
+     <use xlink:href="#mbc2d66cc40" x="38.48513" y="101.310146" style="stroke: #000000"/>
+     <use xlink:href="#mbc2d66cc40" x="22.268358" y="148.548033" style="stroke: #000000"/>
+     <use xlink:href="#mbc2d66cc40" x="22.268367" y="198.492021" style="stroke: #000000"/>
+     <use xlink:href="#mbc2d66cc40" x="38.485157" y="245.729899" style="stroke: #000000"/>
+     <use xlink:href="#mbc2d66cc40" x="69.161426" y="285.142743" style="stroke: #000000"/>
+     <use xlink:href="#mbc2d66cc40" x="110.972838" y="312.459479" style="stroke: #000000"/>
+     <use xlink:href="#mbc2d66cc40" x="159.388592" y="324.72" style="stroke: #000000"/>
+     <use xlink:href="#mbc2d66cc40" x="209.161959" y="320.595646" style="stroke: #000000"/>
+     <use xlink:href="#mbc2d66cc40" x="254.899352" y="300.533346" style="stroke: #000000"/>
+     <use xlink:href="#mbc2d66cc40" x="291.644352" y="266.707163" style="stroke: #000000"/>
+     <use xlink:href="#mbc2d66cc40" x="315.415023" y="222.782752" style="stroke: #000000"/>
+     <use xlink:href="#mbc2d66cc40" x="323.635508" y="173.519969" style="stroke: #000000"/>
+    </g>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="p73067be6ae">
+   <rect x="7.2" y="7.2" width="331.503865" height="332.64"/>
+  </clipPath>
+ </defs>
+</svg>
